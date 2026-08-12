@@ -1,0 +1,10 @@
+/unvise
+/test-data/*
+!/test-data/README.md
+!/test-data/SHA256SUMS
+*.bin
+*.data
+*.rsrc
+*.swp
+*.dSYM/
+.DS_Store
