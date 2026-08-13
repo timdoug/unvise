@@ -2,17 +2,18 @@
 
 `unvise` extracts classic Macintosh InstallerVISE archives on modern macOS and
 other Linux/BSD/POSIX systems. It reads and writes native macOS forks where supported, AppleDouble
-sidecars, and raw `.data`/`.rsrc` fork pairs. I've verified it against 25
+sidecars, and raw `.data`/`.rsrc` fork pairs. I've verified it against 30
 freeware, shareware, and demo installer archives; should be relatively comprehensive, but no promises, patches encouraged!
 
 | InstallerVISE | Supported format features |
 | --- | --- |
 | Lite 3.6 | short catalogs, direct substitution tables |
-| 4.2 | short action records and parameter fields |
+| 4.2, 4.5 | compact catalogs, packed initialization, short action records and parameter fields |
 | 5.0.1, 5.5, 5.5.1, 5.5.2 | packed initialization code, shared payloads, file and action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
 | 6.5 | compressed catalogs |
 | 7.0 | alternate initialization resources, version-source payloads |
+| 8.0.2 | later compressed catalogs, PEF-embedded substitution table, framed payloads |
 
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.

@@ -12,6 +12,7 @@ The archives are ignored by Git because they are third-party software.
 | `utc-display.sit` | Lite 3.6 | extracts after `unar` |
 | `ie30a-java.sit` | 4.2 | extracts after `unar` |
 | `oms232-web.sit` | 4.2 | extracts after `unar` |
+| `PGP50Freeware.hqx` | 4.5 | extracts after decoding HQX |
 | `mac-f2c-141.hqx` | 5.0.1 | decode HQX, then extract with `unar` |
 | `startup-lock-25.hqx` | 5.5 | decode HQX, then extract with `unar` |
 | `bbedit5.sit` | 5.5.1 | extracts after `unar` |
@@ -30,16 +31,24 @@ The archives are ignored by Git because they are third-party software.
 | `icontrol12.sit` | 6.5 | extracts after `unar` |
 | `interarchy40.sit` | 7.0 | extracts after `unar` |
 | `interarchy38.sit` | 7.0 | extracts after `unar` |
+| `MacPython223full.bin` | 8.0.2 | extracts after removing MacBinary |
+| `MacPython223full.hqx` | 8.0.2 | matches `MacPython223full.bin` after decoding |
+| `MacPython233full.bin` | 8.0.2 | extracts after removing MacBinary |
+| `MacPython233full.hqx` | 8.0.2 | matches `MacPython233full.bin` after decoding |
 
 `SHA256SUMS` records the local files exactly.
 
-All 25 fixtures unwrap with `unar -k hidden` and are accepted by `unvise`; the
-four nested HQX/StuffIt fixtures require two explicit `unar` stages on macOS.
-Full extraction succeeds for 23; the two VISE 6 Active Install copies contain
-the same stub and correctly report that its external payload is missing.
+All 30 fixtures unwrap with `unar -k hidden`; the four nested HQX/StuffIt
+fixtures require two explicit `unar` stages on macOS. Full extraction succeeds
+for 28. The two VISE 6 Active Install files contain the same stub and correctly
+report that its external payload is missing.
 
-Debian's `macutils` 2.0b3 removes all five MacBinary wrappers, after which
-`unvise` gives four complete extractions and the same expected web-stub result.
-It decodes the BinHex layer of all four HQX fixtures, but their enclosed
-StuffIt archives use compression methods too new for `macunpack`. The 16
-direct StuffIt fixtures are likewise newer than its StuffIt reader.
+The `.bin` and `.hqx` copies of each MacPython installer decode to identical
+data and resource forks. They are retained to test both transport paths.
+
+For the original 25-file corpus, Debian's `macutils` 2.0b3 removes all five
+MacBinary wrappers; `unvise` then gives four complete extractions and the same
+expected web-stub result. It decodes the BinHex layer of the four original HQX
+fixtures, but their enclosed StuffIt archives use compression methods too new
+for `macunpack`. The 16 direct StuffIt fixtures are likewise newer than its
+StuffIt reader.

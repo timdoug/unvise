@@ -14,7 +14,7 @@ An installer is a classic Macintosh file with two forks:
 | Fork | Contents | Required |
 | --- | --- | --- |
 | Data | `SVCT` header, payload members, catalog | yes |
-| Resource | decompressor initialization in `DATA` and `CODE` resources | yes |
+| Resource | `DATA`/`CODE` decompressor initialization through VISE 7; application resources in VISE 8 | yes |
 
 Accepted representations:
 
@@ -41,6 +41,10 @@ AppleDouble sidecars with `-a`, or native macOS forks with `-n`.
 The catalog starts with `CVCT` and contains `CVCT`, `DVCT`, `FVCT`, and `PACK`
 records.
 
+`PACK` is an ordinary catalog record and can occur in an uncompressed catalog.
+Catalog compression is indicated by the nonzero field at `CVCT+0x08`, not by
+the presence of a `PACK` record.
+
 No authoritative record-length field has been identified. `unvise` finds
 record boundaries by scanning for those four tags. Tag-like bytes in an
 unknown catalog variant could therefore be misidentified.
@@ -50,12 +54,26 @@ unknown catalog variant could therefore be misidentified.
 | Offset | Size | Meaning |
 | ---: | ---: | --- |
 | `+0x00` | 4 | `CVCT` signature |
-| `+0x04` | 4 | packed catalog length when compressed |
+| `+0x04` | 4 | compressed stream length when `+0x08` is nonzero |
 | `+0x08` | 4 | nonzero when the catalog is compressed |
 | `+0x64` | variable | word-swapped raw-DEFLATE stream when compressed |
 
 A compressed catalog expands to ordinary `DVCT`, `FVCT`, and `PACK` records.
-This form is present in the VISE 6.5 corpus.
+This form is present in the VISE 6.5, 7, and 8 corpus.
+
+Observed layouts:
+
+| Layout | Catalog storage | InstallerVISE versions in the corpus |
+| --- | --- | --- |
+| Lite | uncompressed, names at record ends | Lite 3.6 |
+| Compact | uncompressed, shorter records | 4.2, 4.5 |
+| Normal | uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
+| Compressed | word-swapped raw DEFLATE | 6.5, 7.0 |
+| VISE 8 | compressed, with later name offsets | 8.0.2 |
+
+These are observed record/storage layouts, not version numbers. In particular,
+the verified VISE 5.0.1 installer has a normal uncompressed catalog even though
+its catalog contains a `PACK` record.
 
 ## DVCT directory record
 
@@ -68,8 +86,17 @@ This form is present in the VISE 6.5 corpus.
 | `+0x20` | 4 | parent directory ID |
 | `+0x94` | variable | MacRoman name |
 
-For a compressed catalog, the name moves to `+0x98`. The ID fields do not
-move.
+For a compressed catalog, the name moves to `+0x98`; VISE 8 moves it eight
+bytes farther to `+0xa0`. The ID fields do not move.
+
+### Compact catalog (observed in VISE 4.2 and 4.5)
+
+- Both independently sourced VISE 4.2 installers and the VISE 4.5 installer
+  in the corpus use this layout.
+- Their directory records are only `0x5b` to `0x68` bytes long, ruling out the
+  normal layout's name at `+0x94`.
+- Directory and parent IDs remain at `+0x1c` and `+0x20`.
+- The MacRoman name begins at `+0x58`.
 
 ### Lite 3.6 short catalog
 
@@ -94,8 +121,14 @@ move.
 | `+0x68` | 4 | VISE 7 version-source gap size |
 | `+0xba` | variable | MacRoman name |
 
-For a compressed catalog, the name moves to `+0xbe`. The fork and payload
-fields do not move.
+For a compressed catalog, the name moves to `+0xbe`; VISE 8 moves it eight
+bytes farther to `+0xc6`. The fork and payload fields do not move.
+
+### Compact catalog (observed in VISE 4.2 and 4.5)
+
+- Fork sizes and the payload offset retain their common offsets.
+- The parent directory ID is at `+0x60`.
+- The MacRoman name begins at `+0x7c`.
 
 ### Lite 3.6 short catalog
 
@@ -131,6 +164,15 @@ Several `FVCT` records may reference one compressed member:
   packed field 1 may hold the total expanded size.
 - For resource-only groups, packed field 1 holds the compressed size.
 
+### VISE 8 framed payloads
+
+- Shared payload field 0 holds the compressed member size.
+- Shared payload field 1 holds the complete expanded size.
+- Declared forks occupy the beginning in catalog order; installer bookkeeping
+  follows them and is not part of any output fork.
+- A single data-only record can use the same framing: its data fork begins the
+  expanded member and the bookkeeping follows it.
+
 ### VISE 7 version-source payload
 
 One member may contain:
@@ -155,9 +197,11 @@ data fork | version-source material | resource fork
 - `unvise` searches for a unique permutation instead of relying on that offset.
 - No `CODE` 24 resource is required.
 
-### VISE 5 and later
+### VISE 4.2 through 7
 
 - `DATA` resource 0 is normally an `A89F000C` packed-code stream.
+- VISE 4.5 uses `CODE` 18 as its word dictionary and places the permutation
+  directly in the expanded resource.
 - `CODE` 24 normally supplies its word dictionary.
 - VISE 7 uses `CODE` 23 instead.
 - Some VISE 5 and 6 self-installers pack `CODE` 24 and put the required
@@ -176,6 +220,39 @@ Observed permutation addresses:
 
 `unvise` identifies the unique initialized 256-byte permutation instead of
 selecting an address by version.
+
+### VISE 8.0.2
+
+- `DATA` 0 and its initialization program are absent.
+- The main PPC PEF application begins at data-fork offset `0x30`.
+- Expanding its packed-data section exposes the complete 256-byte permutation
+  as a static byte array. The analyzed MacPython 2.3.3 installer loads it at
+  `0x1006da7c`; a relocated global pointer at `0x1006bc90` refers to it.
+- `Dcmp` 1005, labeled `Version 27 (PPC, decomp)`, obtains already-transformed
+  16-bit words through the host application's read callback. It implements the
+  DEFLATE-family decoder but does not contain or generate the permutation.
+- The embedded bytes exactly match the table independently reconstructed from
+  every earlier corpus version.
+- `unvise` parses the input PEF section headers, expands Apple's standard PEF
+  packed-data opcodes, and locates the unique 256-byte permutation in the
+  expanded section. No substitution table is built into `unvise`.
+
+Relevant PEF structures:
+
+| Location | Size | Meaning |
+| ---: | ---: | --- |
+| PEF `+0x20` | 2 | section count |
+| PEF `+0x28` | 28 each | section headers |
+| section `+0x0c` | 4 | expanded initialized size |
+| section `+0x10` | 4 | packed container size |
+| section `+0x14` | 4 | container offset from the PEF header |
+| section `+0x18` | 1 | section kind; `2` is packed data |
+
+The packed-data control byte uses its upper three bits as an opcode and lower
+five bits as a count. A zero count is followed by a base-128 variable-length
+count. Opcodes used by the PEF specification are zero fill, literal block,
+repeated block, repeated-common/interleaved-literal, and
+repeated-zero/interleaved-literal.
 
 ## A89F000C packed code
 
@@ -200,7 +277,7 @@ checked against the PowerPC implementation.
 
 Processing order:
 
-1. Map every packed byte through the `DATA` 0 substitution permutation.
+1. Map every packed byte through the VISE substitution permutation.
 2. Interpret the result as VISE's 16-bit-word representation of DEFLATE.
 3. Normalize mixed/compressed streams to standard raw DEFLATE.
 4. Delegate decompression to zlib.
@@ -252,6 +329,7 @@ Processing order:
 | --- | --- |
 | Lite 3.6 | RAM Charger 8.1; IconDropper 3.0; BarbaBatch 3.1 Demo; UTC Display |
 | 4.2 | Internet Explorer 3.0a Java; OMS 2.3.2 Web |
+| 4.5 | PGP 5.0 Freeware |
 | 5.0.1 | Mac F2C 1.4.1 |
 | 5.5 | Startup Lock 2.5; InstallerVISE 5.5 Demo |
 | 5.5.1 | BBEdit 5.0 Demo |
@@ -260,3 +338,4 @@ Processing order:
 | 6.0.1 | InstallerVISE 6.0.1 |
 | 6.5 | Visual Projector 2.0; InstallerVISE 6.5 Demo; iControl 1.2 |
 | 7.0 | Interarchy 4.0; Interarchy 3.8 |
+| 8.0.2 | MacPython 2.2.3; MacPython 2.3.3 |

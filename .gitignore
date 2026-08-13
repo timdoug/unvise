@@ -1,4 +1,5 @@
 /unvise
+*.o
 /test-data/*
 !/test-data/README.md
 !/test-data/SHA256SUMS
