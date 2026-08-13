@@ -352,12 +352,10 @@ static char *appledouble_path(const char *path) {
 }
 
 static void write_appledouble(const char *path, const uint8_t *p, size_t n,
-                              const uint8_t finder_info[16], uint32_t created,
-                              uint32_t modified, bool resource) {
-    enum { header_size = 26, entry_size = 12, dates_size = 16, finder_size = 32 };
-    unsigned entries = resource ? 3 : 2;
-    size_t dates_offset = header_size + entries * entry_size;
-    size_t finder_offset = dates_offset + dates_size;
+                              const uint8_t finder_info[16], bool resource) {
+    enum { header_size = 26, entry_size = 12, finder_size = 32 };
+    unsigned entries = resource ? 2 : 1;
+    size_t finder_offset = header_size + entries * entry_size;
     size_t resource_offset = finder_offset + finder_size;
     size_t total = resource_offset + (resource ? n : 0);
 
@@ -369,38 +367,23 @@ static void write_appledouble(const char *path, const uint8_t *p, size_t n,
     if (!sidecar.p)
         die("out of memory");
 
-    /*
-     * AppleDouble version 2: ID 8 stores four signed times relative to
-     * 2000-01-01, ID 9 is Finder info, and ID 2 is the resource fork.  VISE
-     * supplies creation and modification times; unknown fields use the
-     * standard 0x80000000 marker.
-     */
+    /* AppleDouble version 2: ID 9 is Finder info and ID 2 is the resource fork. */
     put_be32(sidecar.p, UINT32_C(0x00051607));
     put_be32(sidecar.p + 4, UINT32_C(0x00020000));
     put_be16(sidecar.p + 24, (uint16_t)entries);
-    put_be32(sidecar.p + 26, 8);
-    put_be32(sidecar.p + 30, (uint32_t)dates_offset);
-    put_be32(sidecar.p + 34, dates_size);
-    put_be32(sidecar.p + dates_offset,
-             created ? created - UINT32_C(3029529600) : UINT32_C(0x80000000));
-    put_be32(sidecar.p + dates_offset + 4,
-             modified ? modified - UINT32_C(3029529600) : UINT32_C(0x80000000));
-    put_be32(sidecar.p + dates_offset + 8, UINT32_C(0x80000000));
-    put_be32(sidecar.p + dates_offset + 12, UINT32_C(0x80000000));
-    put_be32(sidecar.p + 38, 9);
-    put_be32(sidecar.p + 42, (uint32_t)finder_offset);
-    put_be32(sidecar.p + 46, finder_size);
+    put_be32(sidecar.p + 26, 9);
+    put_be32(sidecar.p + 30, (uint32_t)finder_offset);
+    put_be32(sidecar.p + 34, finder_size);
     memcpy(sidecar.p + finder_offset, finder_info, 16);
     if (resource) {
-        put_be32(sidecar.p + 50, 2);
-        put_be32(sidecar.p + 54, (uint32_t)resource_offset);
-        put_be32(sidecar.p + 58, (uint32_t)n);
+        put_be32(sidecar.p + 38, 2);
+        put_be32(sidecar.p + 42, (uint32_t)resource_offset);
+        put_be32(sidecar.p + 46, (uint32_t)n);
         memcpy(sidecar.p + resource_offset, p, n);
     }
 
     char *sidecar_path = appledouble_path(path);
 
-    touch_file(path);
     write_file(sidecar_path, sidecar.p, sidecar.n);
     free(sidecar_path);
     free(sidecar.p);
@@ -429,19 +412,50 @@ static void write_native_dates(const char *path, uint32_t created, uint32_t modi
 }
 #endif
 
+static void write_posix_modified(const char *path, uint32_t modified) {
+    enum { mac_to_unix = 2082844800U };
+    struct timespec dates[2];
+
+    if (!modified)
+        return;
+    dates[0].tv_sec = 0;
+    dates[0].tv_nsec = UTIME_OMIT;
+    dates[1].tv_sec = (time_t)((int64_t)modified - mac_to_unix);
+    dates[1].tv_nsec = 0;
+    if (utimensat(AT_FDCWD, path, dates, 0))
+        die_errno(path);
+}
+
+static void write_native_finder_info(const char *path, const uint8_t finder_info[16]) {
+#ifdef __APPLE__
+    uint8_t extended_finder_info[32] = {0};
+
+    memcpy(extended_finder_info, finder_info, 16);
+    if (setxattr(path, "com.apple.FinderInfo", extended_finder_info,
+                 sizeof(extended_finder_info), 0, 0))
+        die_errno(path);
+#else
+    (void)path;
+    (void)finder_info;
+#endif
+}
+
 void write_output(const Options *o, const char *path, const char *fork, const uint8_t *p, size_t n,
                   const uint8_t finder_info[16], uint32_t created, uint32_t modified) {
     if (o->appledouble) {
+        touch_file(path);
         if (!strcmp(fork, "data")) {
             write_file(path, p, n);
-            write_appledouble(path, NULL, 0, finder_info, created, modified, false);
+            write_appledouble(path, NULL, 0, finder_info, false);
         } else
-            write_appledouble(path, p, n, finder_info, created, modified, true);
+            write_appledouble(path, p, n, finder_info, true);
+        write_posix_modified(path, modified);
         return;
     }
 
     if (!o->native) {
         write_file(path, p, n);
+        write_posix_modified(path, modified);
         return;
     }
 
@@ -463,12 +477,7 @@ void write_output(const Options *o, const char *path, const char *fork, const ui
         free(resource_path);
     }
 
-    uint8_t extended_finder_info[32] = {0};
-
-    memcpy(extended_finder_info, finder_info, 16);
-    if (setxattr(path, "com.apple.FinderInfo", extended_finder_info,
-                 sizeof(extended_finder_info), 0, 0))
-        die_errno(path);
+    write_native_finder_info(path, finder_info);
     write_native_dates(path, created, modified);
 
 #else
@@ -476,6 +485,30 @@ void write_output(const Options *o, const char *path, const char *fork, const ui
     (void)fork;
     (void)p;
     (void)n;
+    (void)finder_info;
+    (void)created;
+    (void)modified;
+    die("-n is only supported on macOS");
+#endif
+}
+
+void write_directory_metadata(const Options *o, const char *path,
+                              const uint8_t finder_info[16], uint32_t created,
+                              uint32_t modified) {
+    if (o->appledouble) {
+        write_appledouble(path, NULL, 0, finder_info, false);
+        write_posix_modified(path, modified);
+        return;
+    }
+    if (!o->native) {
+        write_posix_modified(path, modified);
+        return;
+    }
+#ifdef __APPLE__
+    write_native_finder_info(path, finder_info);
+    write_native_dates(path, created, modified);
+#else
+    (void)path;
     (void)finder_info;
     (void)created;
     (void)modified;

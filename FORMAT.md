@@ -29,9 +29,11 @@ For a raw pair, the command-line input may name the stem, `.data` file, or
 MacBinary, BinHex, and StuffIt are outer formats and must be removed first.
 
 Output representations are raw `.data`/`.rsrc` fork pairs by default, hidden
-AppleDouble sidecars with `-a`, or native macOS forks with `-n`. AppleDouble
-and native output preserve the catalog's Finder information and file creation
-and modification times; the raw-pair convention has no metadata container.
+AppleDouble sidecars with `-a`, or native macOS forks with `-n`. Native output
+preserves Finder information and creation/modification times for files and
+directories. AppleDouble preserves Finder information and resource forks;
+AppleDouble and raw output apply the catalog modification time to each
+ordinary filesystem object. Only native output preserves creation time.
 
 ## SVCT data fork
 
@@ -90,6 +92,9 @@ uncompressed catalog even though its catalog contains a `PACK` record.
 | Offset | Size | Meaning |
 | ---: | ---: | --- |
 | `+0x00` | 4 | `DVCT` signature |
+| `+0x04` | 16 | classic directory Finder information |
+| `+0x14` | 4 | classic Mac creation time |
+| `+0x18` | 4 | classic Mac modification time |
 | `+0x1c` | 4 | directory ID |
 | `+0x20` | 4 | parent directory ID |
 | `+0x50` | 1 | primary trailing-name length |
@@ -106,6 +111,12 @@ original PPC loaders.
 The VISE 8.0.2 directory body is `0xa0` bytes and the VISE 8.5 body is `0xa4`
 bytes. The primary and optional secondary trailing-name lengths are bytes at
 `+0x50` and `+0x4f` respectively.
+
+The VISE 4.5 68K loader copies raw directory `+0x04..+0x13` into the internal
+Finder-information field and raw `+0x14/+0x18` into its creation/modification
+fields. The VISE 8.5 PPC loader independently performs the same 16-byte
+metadata copy. Directory metadata is applied after all children, in reverse
+catalog order, so creating a child cannot replace the restored parent mtime.
 
 ### Compact catalog
 
@@ -176,8 +187,7 @@ The same PPC loader copies raw `+0x3c` and `+0x40` to internal record fields
 the classic catalog-info routine that sets creation and modification dates.
 The recovered VISE 4.5 68K loader performs the same two copies, independently
 confirming the layout. Native output converts the 1904 Mac epoch to the Unix
-epoch; AppleDouble entry ID 8 stores the equivalent signed values relative to
-2000-01-01 and marks unavailable backup/access times with `0x80000000`.
+epoch.
 
 ### Compact catalog
 
@@ -458,9 +468,14 @@ Processing order:
   default. `-r` preserves their original bytes instead on
   byte-oriented filesystems; modern macOS permits raw listing but not raw-name
   extraction.
-- Native and AppleDouble output preserve each file record's creation time,
-  modification time, and 16-byte Finder information. Directory attributes are
-  not yet emitted.
+- Native output preserves file and directory creation times, modification
+  times, and 16-byte Finder information. AppleDouble preserves Finder
+  information and resource forks. AppleDouble and raw output preserve
+  modification times using POSIX filesystem timestamps. AppleDouble entry ID
+  8 can represent dates historically, but current macOS `copyfile`/`dot_clean`
+  rejects sidecars containing it; interoperable output therefore omits it.
+  Directory permissions and installer-defined post-install actions are not
+  applied.
 - Installer actions, conditions, and package selection are catalog semantics,
   not file payloads; `unvise` extracts all distinct file alternatives rather
   than executing that installation policy.

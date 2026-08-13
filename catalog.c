@@ -468,6 +468,15 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
         if (!strcmp(record->tag, "DVCT") && record->end - record->off >= 0x24) {
             record->dir_id = be32(data, record->off + 0x1c);
             record->parent = be32(data, record->off + 0x20);
+            /*
+             * The 68K directory loader copies raw +0x04..+0x13 as Finder
+             * information and raw +0x14/+0x18 as creation/modification time.
+             * The VISE 8 PPC loader performs the same 16-byte metadata copy.
+             */
+            memcpy(record->finder_info, data.p + record->off + 4,
+                   sizeof(record->finder_info));
+            record->created = be32(data, record->off + 0x14);
+            record->modified = be32(data, record->off + 0x18);
             if (layout == CATALOG_VISE8)
                 record->depth = be16(data, record->off + 0x48);
         } else if (!strcmp(record->tag, "FVCT"))

@@ -370,6 +370,32 @@ static void extract_records(const Extraction *x) {
             free(x->deferred[i].fork[fork].p);
 }
 
+static void write_directories(const Extraction *x) {
+    size_t output_length = strlen(x->options->out);
+
+    /*
+     * Records are preorder, so reverse order applies child metadata before
+     * parent metadata. Creating a child or its AppleDouble sidecar therefore
+     * cannot subsequently disturb the parent's restored modification time.
+     */
+    for (size_t i = x->count; i; i--) {
+        const Record *record = &x->records[i - 1];
+
+        if (strcmp(record->tag, "DVCT"))
+            continue;
+        size_t path_length = output_length + 1 + strlen(record->path) + 1;
+        char *path = malloc(path_length);
+
+        if (!path)
+            die("out of memory");
+        snprintf(path, path_length, "%s/%s", x->options->out, record->path);
+        mkdirs(path);
+        write_directory_metadata(x->options, path, record->finder_info,
+                                 record->created, record->modified);
+        free(path);
+    }
+}
+
 static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *present) {
     Buffer packed = {0}, code = {0};
 
@@ -499,6 +525,8 @@ int run_installer(const Options *options, const char *input_path) {
             die("out of memory");
         load_table(&x, data0, direct_table, has_data0);
         extract_records(&x);
+        if (options->out)
+            write_directories(&x);
         free(x.deferred);
         free_records(x.records, x.count);
     }

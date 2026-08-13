@@ -8,6 +8,7 @@
 #endif
 
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -69,6 +70,9 @@ void make_parent_dir(const char *path);
 bool resource_find(Buffer r, const char type[4], int wanted, Buffer *result);
 void write_output(const Options *o, const char *path, const char *fork, const uint8_t *p, size_t n,
                   const uint8_t finder_info[16], uint32_t created, uint32_t modified);
+void write_directory_metadata(const Options *o, const char *path,
+                              const uint8_t finder_info[16], uint32_t created,
+                              uint32_t modified);
 
 Buffer unpack_code(Buffer p, Buffer code);
 unsigned find_permutation(Buffer b, uint8_t table[256]);

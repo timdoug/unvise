@@ -6,8 +6,10 @@ sidecars, and raw `.data`/`.rsrc` fork pairs. I've tested it against 36
 freeware, shareware, and demo installer archives; should be relatively comprehensive, but no promises, patches encouraged!
 
 Expanded files are verified against the CRC-32 stored in their catalog
-records. Native and AppleDouble output also preserve classic Finder
-information and file creation/modification times.
+records. Native output preserves classic Finder information and
+creation/modification times for files and directories. AppleDouble preserves
+Finder information and resource forks; AppleDouble and raw output also apply
+the modification time to each ordinary filesystem object.
 
 | InstallerVISE | Supported format features |
 | --- | --- |
@@ -118,7 +120,11 @@ Accepted installer inputs:
 
 AppleDouble is a metadata container. Its resource-fork entry contains the raw
 fork plus a header and entry table; `._name` is the standard loose-file naming
-convention. A raw `.rsrc` from `macunpack -f` contains only the fork bytes.
+convention. A raw `.rsrc` from `macunpack -f` contains only the fork bytes, so
+its filesystem modification time is preserved but Finder information and the
+classic creation time have nowhere portable to go. AppleDouble carries Finder
+information, but modern macOS rejects its historical date entry, so creation
+time is preserved only by native output.
 For a raw pair, `unvise` accepts `Installer`, `Installer.data`, or
 `Installer.rsrc` and resolves both files automatically.
 
@@ -156,7 +162,7 @@ but the StuffIt samples in this corpus require `unar`.
 Password-protected archives are unsupported. The corpus contains one VISE 6
 Active Install stub in two wrappers; `unvise` recognizes it, but does not
 locate or decode its external payload archive. Native MSVC builds are
-unsupported. Installer actions and directory attributes are not applied.
+unsupported. Installer actions and directory permissions are not applied.
 
 See [FORMAT.md](FORMAT.md) for the reverse-engineered format details.
 
