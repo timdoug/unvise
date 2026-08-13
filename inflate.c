@@ -18,37 +18,6 @@ static void append_byte(Buffer *b, size_t *capacity, uint8_t value) {
     b->p[b->n++] = value;
 }
 
-static Buffer inflate_stored(const uint8_t *x, size_t n, size_t expected) {
-    /*
-     * VISE stored blocks resemble DEFLATE stored blocks but align and order
-     * data as big-endian 16-bit words. zlib cannot consume this representation
-     * directly, so only this nonstandard block type is decoded here.
-     */
-    Buffer out = {(uint8_t *)malloc(expected ? expected : 1), 0};
-    if (!out.p)
-        die("out of memory");
-    size_t p = 0;
-    for (;;) {
-        if (p + 6 > n)
-            die("truncated VISE stored block");
-        unsigned ctl = (x[p] << 8) | x[p + 1], len = (x[p + 2] << 8) | x[p + 3],
-                 inv = (x[p + 4] << 8) | x[p + 5];
-        p += 6;
-        if (((ctl >> 1) & 3) || len != ((~inv) & 0xffffu))
-            die("invalid VISE stored block");
-        if (len > expected - out.n || p + ((len + 1) & ~1u) > n)
-            die("VISE stored block overflow");
-        for (unsigned i = 0; i < len; i++)
-            out.p[out.n++] = (i & 1) ? x[p + i - 1] : x[p + i + 1];
-        p += (len + 1) & ~1u;
-        if (ctl & 1)
-            break;
-    }
-    if (out.n != expected)
-        die("expanded stored-block size mismatch");
-    return out;
-}
-
 typedef struct {
     Buffer input;
     size_t bit;
@@ -299,14 +268,6 @@ Buffer inflate_member(Buffer packed, const uint8_t table[256], size_t expected) 
     /* Every member byte first passes through VISE's substitution table. */
     for (size_t i = 0; i < packed.n; i++)
         x[i] = table[packed.p[i]];
-
-    unsigned first = (x[0] << 8) | x[1];
-
-    if (((first >> 1) & 3) == 0) {
-        Buffer out = inflate_stored(x, packed.n, expected);
-        free(x);
-        return out;
-    }
 
     Buffer deflate = standardize_deflate((Buffer){x, packed.n});
 

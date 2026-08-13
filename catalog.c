@@ -92,9 +92,13 @@ static char *record_name(Buffer data, Record *r, CatalogLayout layout, bool raw_
     }
 
     static const uint8_t file_offsets[] = {0x7c, 0x8c, 0xba, 0xbe, 0xc6};
-    static const uint8_t directory_offsets[] = {0x58, 0x68, 0x94, 0x98, 0xa0};
+    static const uint8_t directory_offsets[] = {0x58, 0x68, 0x94, 0x98, 0xa0, 0xa4};
     const uint8_t *offsets;
     size_t count;
+    size_t name_end = r->end;
+
+    if (name_end > r->off && data.p[name_end - 1] == 0)
+        name_end--;
 
     if (!strcmp(r->tag, "FVCT")) {
         offsets = file_offsets;
@@ -114,8 +118,8 @@ static char *record_name(Buffer data, Record *r, CatalogLayout layout, bool raw_
     for (size_t i = 0; i < count; i++) {
         size_t start = r->off + offsets[i];
 
-        if (valid_name(data, start, r->end))
-            return convert_name(data.p + start, r->end - start, raw_names);
+        if (valid_name(data, start, name_end))
+            return convert_name(data.p + start, name_end - start, raw_names);
     }
 
     return NULL;

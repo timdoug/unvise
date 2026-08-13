@@ -14,7 +14,7 @@ freeware, shareware, and demo installer archives; should be relatively comprehen
 | 6.5 | compressed catalogs |
 | 7.0 | alternate initialization resources, version-source payloads |
 | 7.3 | PEF-embedded substitution table with ordinary compressed catalog records |
-| 8.0.2 | later compressed catalogs, PEF-embedded substitution table, framed payloads |
+| 8.0.2, 8.5 | later compressed catalogs, PEF tables, framed payloads, mixed stored/compressed blocks |
 
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.
@@ -146,8 +146,8 @@ StuffIt archives, but the 16 StuffIt files in the corpus require `unar`.
 
 Password-protected archives are unsupported. The corpus contains one VISE 6
 Active Install stub in two wrappers; `unvise` recognizes it, but does not
-locate or decode its external payload archive. VISE 8.5 adds an unresolved
-payload variant. Native MSVC builds are unsupported.
+locate or decode its external payload archive. Native MSVC builds are
+unsupported.
 
 See [FORMAT.md](FORMAT.md) for the reverse-engineered format details.
 

@@ -39,7 +39,7 @@ The archives are ignored by Git because they are third-party software.
 | `MacPython223full.hqx` | 8.0.2 | matches `MacPython223full.bin` after decoding |
 | `MacPython233full.bin` | 8.0.2 | extracts after removing MacBinary |
 | `MacPython233full.hqx` | 8.0.2 | matches `MacPython233full.bin` after decoding |
-| `IVISE8.5_NormalInstall.bin` | 8.5 | recognized; one new payload variant remains |
+| `IVISE8.5_NormalInstall.bin` | 8.5 | extracts after removing MacBinary |
 | `InstallerVISE85.sit_.bin` | 8.5 | contains the preceding installer |
 
 `SHA256SUMS` records the local files exactly.
@@ -48,7 +48,7 @@ The archives are ignored by Git because they are third-party software.
 `https://ftp.hp.com/pub/softlib/software4/lj606/lj-29264-1/ljlegacy-en.sit`.
 
 All 36 fixtures unwrap with the current `unar`. Nested HQX/StuffIt fixtures
-require two explicit `unar` stages on macOS. Full extraction succeeds for 32.
+require two explicit `unar` stages on macOS. Full extraction succeeds for 34.
 The two VISE 6 Active Install files contain the same stub and correctly
 report that its external payload is missing.
 

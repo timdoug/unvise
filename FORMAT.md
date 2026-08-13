@@ -69,7 +69,7 @@ Observed layouts:
 | Compact | uncompressed, shorter records | 4.2, 4.5, 4.6.1 |
 | Normal | uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
 | Compressed | word-swapped raw DEFLATE | 6.5, 7.0, 7.3 |
-| VISE 8 | compressed, with later name offsets | 8.0.2 |
+| VISE 8 | compressed, with later name offsets | 8.0.2, 8.5 |
 
 These are observed record/storage layouts, not version numbers. In particular,
 the verified VISE 5.0.1 installer has a normal uncompressed catalog even though
@@ -86,8 +86,8 @@ its catalog contains a `PACK` record.
 | `+0x20` | 4 | parent directory ID |
 | `+0x94` | variable | MacRoman name |
 
-For a compressed catalog, the name moves to `+0x98`; VISE 8 moves it eight
-bytes farther to `+0xa0`. The ID fields do not move.
+For a compressed catalog, the name moves to `+0x98`; observed VISE 8 records
+use `+0xa0` or `+0xa4`. The ID fields do not move.
 
 ### Compact catalog
 
@@ -303,8 +303,8 @@ Processing order:
 - Fixed and dynamic Huffman blocks use standard DEFLATE symbols.
 - Bits are stored in big-endian 16-bit words rather than ordinary DEFLATE
   bytes.
-- For compressed-only streams, swapping each 16-bit word produces standard
-  raw DEFLATE.
+- `unvise` parses the block structure and rewrites the bit representation as
+  standard raw DEFLATE.
 
 ### Stored blocks
 
@@ -312,10 +312,11 @@ Processing order:
 - The header contains `LEN` and one's-complement `NLEN`.
 - Payload bytes are ordered as big-endian 16-bit words.
 - An odd payload length consumes one padding byte.
-- Stored-only members are copied directly.
-- For mixed streams, `unvise` parses Huffman symbols only to locate block
-  boundaries, rewrites the representation, and leaves actual decompression to
-  zlib.
+- Stored-only and mixed streams follow the same normalization path. This is
+  required because VISE 8.5 streams may begin with stored blocks and later
+  switch to Huffman-compressed blocks.
+- `unvise` parses Huffman symbols only to locate block boundaries, rewrites the
+  representation, and leaves actual decompression to zlib.
 
 ## Independent evidence
 
@@ -357,3 +358,4 @@ Processing order:
 | 7.0 | Interarchy 4.0; Interarchy 3.8 |
 | 7.3 | HP LaserJet 4/5/6 legacy driver |
 | 8.0.2 | MacPython 2.2.3; MacPython 2.3.3 |
+| 8.5 | Installer VISE 8.5 |
