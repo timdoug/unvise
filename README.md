@@ -18,7 +18,7 @@ the modification time to each ordinary filesystem object.
 | 5.0.1, 5.5, 5.5.1, 5.5.2 | packed initialization code, shared payloads, file and action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
 | 6.5 | compressed catalogs |
-| 7.0 | alternate initialization resources, offset-fork payloads |
+| 7.0, 7.0.1 | alternate initialization resources, offset-fork and gapped shared payloads |
 | 7.3 | PEF-embedded substitution table with ordinary compressed catalog records |
 | 8.0.2, 8.5 | later compressed catalogs, PEF tables, framed payloads, mixed stored/compressed blocks |
 

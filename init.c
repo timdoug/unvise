@@ -280,8 +280,10 @@ void data0_table(Buffer d, uint8_t table[256]) {
      * fill, or 0xff-fill runs. Values 5-15 are reserved and rejected.
      * The 64 KiB arrays model signed 16-bit A5-relative addresses; adding
      * 32768 maps -32768..32767 to array indices. The substitution table moves
-     * between VISE releases, but is identifiable as the initializer's sole
-     * contiguous 256-byte permutation.
+     * between VISE releases. The original 68K code addresses it through a
+     * build-specific A5-relative global; DATA 0 has no field naming that
+     * global. Identify the initializer's sole contiguous 256-byte permutation
+     * instead of interpreting each installer's machine code.
      */
     uint8_t mem[65536] = {0}, set[65536] = {0};
     size_t src = 4;
@@ -369,4 +371,3 @@ void data0_table(Buffer d, uint8_t table[256]) {
     if (matches != 1)
         die("could not identify a unique VISE substitution table");
 }
-

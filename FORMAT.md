@@ -234,9 +234,12 @@ Several `FVCT` records may reference one compressed member:
 - Records are grouped by equal payload offset.
 - `FVCT+0x68` and `FVCT+0x6c` locate each fork in the expanded member.
 - Expanded fork sizes delimit the ranges beginning at those offsets.
-- For combined-fork groups, packed field 0 holds the compressed size and
-  packed field 1 may hold the total expanded size.
-- For resource-only groups, packed field 1 holds the compressed size.
+- A group containing data forks stores the compressed member size in packed
+  field 0 and its complete expanded size in packed field 1. Declared fork
+  offsets can leave installer-private gaps in that expansion.
+- A resource-only group stores its compressed member size in packed field 1;
+  its declared resource-fork sizes determine the expanded size.
+- VISE 8 consistently uses the first form, including data-only members.
 
 ### Conditional path collisions
 
@@ -314,6 +317,9 @@ at their declared offsets and excludes the prefix.
 - Expanding `DATA` 0 produces three initialization streams.
 - The streams initialize a 256-byte substitution permutation in an emulated
   signed 16-bit A5-relative address space.
+- `DATA 0` does not identify the table by offset or symbol. The original 68K
+  decompressor references it as a compiled A5-relative global, and that address
+  changes between builds.
 
 Observed permutation addresses:
 
@@ -323,8 +329,9 @@ Observed permutation addresses:
 | 5.5.2 | `-0x151c` |
 | 6.5 | `-0x15ca` |
 
-`unvise` identifies the unique initialized 256-byte permutation instead of
-selecting an address by version.
+`unvise` identifies the sole initialized 256-byte permutation. Reproducing the
+original lookup more literally would require recognizing a build-specific
+machine-code reference and would not decode additional archive metadata.
 
 The initializer command byte is decoded exhaustively:
 
@@ -357,14 +364,18 @@ The initializer command byte is decoded exhaustively:
 - Expanding its packed-data section exposes the complete 256-byte permutation
   as a static byte array. The analyzed MacPython 2.3.3 installer loads it at
   `0x1006da7c`; a relocated global pointer at `0x1006bc90` refers to it.
+- As in the 68K implementation, the table address belongs to the compiled
+  application rather than to an InstallerVISE archive structure.
 - `Dcmp` 1005, labeled `Version 27 (PPC, decomp)`, obtains already-transformed
   16-bit words through the host application's read callback. It implements the
   DEFLATE-family decoder but does not contain or generate the permutation.
 - The embedded bytes exactly match the table independently reconstructed from
   every earlier corpus version.
 - `unvise` parses the input PEF section headers, expands Apple's standard PEF
-  packed-data opcodes, and locates the unique 256-byte permutation in the
-  expanded section. No substitution table is built into `unvise`.
+  packed-data opcodes, and locates the sole 256-byte permutation in the
+  expanded section. Following the original relocated pointer would require a
+  PEF relocation and machine-code analysis pass. No substitution table is
+  built into `unvise`.
 - A candidate is accepted only when all 256 byte values occur exactly once.
   The catalog CRC-32 of every extracted file then independently validates the
   selected table; all extractable corpus installers pass this check.
@@ -503,6 +514,7 @@ Processing order:
 | 6.0.1 | InstallerVISE 6.0.1 |
 | 6.5 | Visual Projector 2.0; InstallerVISE 6.5 Demo; iControl 1.2 |
 | 7.0 | Interarchy 4.0; Interarchy 3.8 |
+| 7.0.1 | Tcl/Tk 8.3.2p1 Runtime and Web installers |
 | 7.3 | HP LaserJet 4/5/6 legacy driver |
 | 8.0.2 | MacPython 2.2.3; MacPython 2.3.3 |
 | 8.5 | Installer VISE 8.5 |

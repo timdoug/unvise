@@ -218,19 +218,27 @@ static size_t shared_expanded_size(const Extraction *x, uint32_t payload) {
 
 static size_t shared_packed_size(const Extraction *x, const Record *record,
                                  size_t *expanded_size) {
+    bool has_data = false;
+
+    for (size_t i = 0; i < x->count; i++)
+        if (same_payload(&x->records[i], record->payload) && x->records[i].expanded[0])
+            has_data = true;
+
     /*
-     * The catalog uses the same two fields for three member headers. Older
-     * combined members store (packed size, total expanded size), resource-only
-     * members put their packed size in field 1, and VISE 8 always stores that
-     * pair. These are format alternatives, not guesses about DEFLATE output.
+     * A shared group containing data forks uses field 0 as its packed size;
+     * field 1 is the complete expanded member size. A resource-only group
+     * instead uses field 1 as its packed size and the declared fork sizes give
+     * the expanded size. VISE 8 always uses the first form.
      */
-    if (record->packed[0] && record->packed[1] == *expanded_size)
-        return record->packed[0];
-    if (!!record->packed[0] != !!record->packed[1])
-        return record->packed[0] ? record->packed[0] : record->packed[1];
     if (catalog_has_vise8_payloads(x->layout)) {
         *expanded_size = record->packed[1];
+        if (record->packed[0] && *expanded_size)
+            return record->packed[0];
+    } else if (has_data && record->packed[0] && record->packed[1]) {
+        *expanded_size = record->packed[1];
         return record->packed[0];
+    } else if (!has_data && record->packed[1]) {
+        return record->packed[1];
     }
 
     fprintf(stderr,
@@ -262,7 +270,7 @@ static PayloadLayout payload_layout(const Extraction *x, const Record *record,
         return PAYLOAD_VISE8_MEMBER;
 
     if (record->has_fork_offsets && record->packed[0] && member_end &&
-        record->packed[1] == member_end)
+        record->packed[1] >= member_end)
         return PAYLOAD_OFFSET_MEMBER;
 
     return PAYLOAD_SEPARATE_FORKS;
@@ -271,6 +279,7 @@ static PayloadLayout payload_layout(const Extraction *x, const Record *record,
 static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expanded) {
     size_t position = 0;
     size_t covered_end = 0;
+    bool uses_offsets = false;
 
     for (size_t i = 0; i < x->count; i++)
         if (same_payload(&x->records[i], payload)) {
@@ -281,8 +290,10 @@ static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expa
                 if (record->expanded[fork]) {
                     size_t size = record->expanded[fork];
 
-                    if (record->has_fork_offsets)
+                    if (record->has_fork_offsets) {
+                        uses_offsets = true;
                         position = record->fork_offset[fork];
+                    }
 
                     if (position > expanded.n || size > expanded.n - position)
                         die("shared payload layout overflow");
@@ -299,7 +310,7 @@ static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expa
                     emit_fork(x, i, fork, forks[fork], record->expanded[fork]);
         }
 
-    if (covered_end != expanded.n && !catalog_has_vise8_payloads(x->layout))
+    if (covered_end != expanded.n && !uses_offsets && !catalog_has_vise8_payloads(x->layout))
         die("unassigned bytes in shared payload");
 }
 

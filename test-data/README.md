@@ -34,6 +34,8 @@ The archives are ignored by Git because they are third-party software.
 | `icontrol12.sit` | 6.5 | extracts after `unar` |
 | `interarchy40.sit` | 7.0 | extracts after `unar` |
 | `interarchy38.sit` | 7.0 | extracts after `unar` |
+| `TclTk_8.3.2p1_RuntimeInstall.bin` | 7.0.1 | MacBinary; extracts after `unar` |
+| `TclTk_8.3.2_WebInstall.bin` | 7.0.1 Active Install | reports missing external payload |
 | `ljlegacy-en.sit` | 7.3 | extracts after `unar` |
 | `MacPython223full.bin` | 8.0.2 | extracts after removing MacBinary |
 | `MacPython223full.hqx` | 8.0.2 | matches `MacPython223full.bin` after decoding |
@@ -47,10 +49,14 @@ The archives are ignored by Git because they are third-party software.
 `ljlegacy-en.sit` is HP's public legacy LaserJet installer from
 `https://ftp.hp.com/pub/softlib/software4/lj606/lj-29264-1/ljlegacy-en.sit`.
 
-All 36 fixtures unwrap with the current `unar`. Nested HQX/StuffIt fixtures
-require two explicit `unar` stages on macOS. Full extraction succeeds for 34.
-The two VISE 6 Active Install files contain the same stub and correctly
-report that its external payload is missing.
+All 38 fixtures unwrap with the current `unar`. Nested HQX/StuffIt fixtures
+require two explicit `unar` stages on macOS. Full extraction succeeds for 35.
+The two VISE 6 Active Install files contain the same stub; the independent
+Tcl/Tk VISE 7.0.1 web installer is another stub. All three correctly report
+that their external payload is missing.
+
+The Tcl/Tk files are the original SourceForge releases:
+`https://sourceforge.net/projects/tcl/files/Tcl/8.3.2/`.
 
 The `.bin` and `.hqx` copies of each MacPython installer decode to identical
 data and resource forks. They are retained to test both transport paths.
