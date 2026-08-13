@@ -539,17 +539,29 @@ static void recover_lite_paths(Record *records, size_t count) {
             directory_has_id(records, count, record->parent))
             continue;
 
-        /*
-         * The Lite engine treats +0x58 as a destination reference. Most are
-         * DVCT IDs, but some are opaque installer-object IDs with no DVCT in
-         * the archive. For those, preorder is the only catalog representation
-         * of the display hierarchy. A value used as a DVCT parent denotes the
-         * virtual root rather than the most recently listed directory.
-         */
-        if (directory_has_parent(records, count, record->parent))
+        /* A destination used as a DVCT parent denotes the virtual root. */
+        if (directory_has_parent(records, count, record->parent)) {
             current_dir = 0;
-        else if (current_dir)
+            continue;
+        }
+
+        /*
+         * Lite represents a custom folder icon as an FVCT named "Icon\r"
+         * with Finder type 'icon' and creator 'MACS'. Its +0x58 value is a
+         * runtime destination object rather than a DVCT ID. The operation
+         * applies to the directory immediately preceding it in preorder.
+         */
+        if (current_dir && record->name && !strcmp(record->name, "Icon\r") &&
+            !memcmp(record->finder_info, "iconMACS", 8)) {
             record->parent = current_dir;
+            continue;
+        }
+
+        fprintf(stderr, "unvise: unresolved Lite destination 0x%08X for ",
+                record->parent);
+        print_quoted(stderr, record->name ? record->name : "unnamed", false);
+        fputc('\n', stderr);
+        exit(1);
     }
 }
 

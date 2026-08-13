@@ -16,6 +16,13 @@ typedef struct {
     DeferredOutput *deferred;
 } Extraction;
 
+typedef enum {
+    PAYLOAD_SEPARATE_FORKS,
+    PAYLOAD_SHARED_MEMBER,
+    PAYLOAD_OFFSET_MEMBER,
+    PAYLOAD_VISE8_MEMBER
+} PayloadLayout;
+
 static bool record_has_payload(const Record *record) {
     return !strcmp(record->tag, "FVCT") && record->file &&
            (record->expanded[0] || record->expanded[1]) &&
@@ -211,6 +218,12 @@ static size_t shared_expanded_size(const Extraction *x, uint32_t payload) {
 
 static size_t shared_packed_size(const Extraction *x, const Record *record,
                                  size_t *expanded_size) {
+    /*
+     * The catalog uses the same two fields for three member headers. Older
+     * combined members store (packed size, total expanded size), resource-only
+     * members put their packed size in field 1, and VISE 8 always stores that
+     * pair. These are format alternatives, not guesses about DEFLATE output.
+     */
     if (record->packed[0] && record->packed[1] == *expanded_size)
         return record->packed[0];
     if (!!record->packed[0] != !!record->packed[1])
@@ -225,6 +238,34 @@ static size_t shared_packed_size(const Extraction *x, const Record *record,
             "(0x%X, 0x%X, expanded 0x%zx)\n",
             record->payload, record->packed[0], record->packed[1], *expanded_size);
     exit(1);
+}
+
+static PayloadLayout payload_layout(const Extraction *x, const Record *record,
+                                    size_t shared_count) {
+    size_t member_end = 0;
+
+    if (record->has_fork_offsets)
+        for (int fork = 0; fork < 2; fork++) {
+            size_t offset = record->fork_offset[fork];
+
+            if (record->expanded[fork] > SIZE_MAX - offset)
+                die("fork offset overflow");
+            if (offset + record->expanded[fork] > member_end)
+                member_end = offset + record->expanded[fork];
+        }
+
+    if (shared_count > 1)
+        return PAYLOAD_SHARED_MEMBER;
+
+    if (catalog_has_vise8_payloads(x->layout) && record->packed[0] &&
+        record->packed[1] && record->expanded[0] && !record->expanded[1])
+        return PAYLOAD_VISE8_MEMBER;
+
+    if (record->has_fork_offsets && record->packed[0] && member_end &&
+        record->packed[1] == member_end)
+        return PAYLOAD_OFFSET_MEMBER;
+
+    return PAYLOAD_SEPARATE_FORKS;
 }
 
 static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expanded) {
@@ -334,33 +375,20 @@ static void extract_records(const Extraction *x) {
             continue;
         size_t first = i;
         size_t shared_count = shared_records(x, record->payload, &first);
-        size_t framed_end = 0;
+        PayloadLayout layout = payload_layout(x, record, shared_count);
 
-        if (record->has_fork_offsets)
-            for (int fork = 0; fork < 2; fork++) {
-                size_t offset = record->fork_offset[fork];
-
-                if (record->expanded[fork] > SIZE_MAX - offset)
-                    die("fork offset overflow");
-                size_t end = offset + record->expanded[fork];
-
-                if (end > framed_end)
-                    framed_end = end;
-            }
-
-        if (shared_count == 1 && catalog_has_vise8_payloads(x->layout) && record->packed[0] &&
-            record->packed[1] && record->expanded[0] && !record->expanded[1]) {
+        if (layout == PAYLOAD_VISE8_MEMBER) {
             extract_vise8_framed(x, i);
-        } else if (shared_count == 1 && record->has_fork_offsets && record->packed[0] &&
-                   record->packed[1] == framed_end && framed_end) {
+        } else if (layout == PAYLOAD_OFFSET_MEMBER) {
             extract_offset_forks(x, i);
-        } else if (shared_count > 1) {
+        } else if (layout == PAYLOAD_SHARED_MEMBER) {
             if (i != first || shared_done[first])
                 continue;
             shared_done[first] = true;
             extract_shared(x, i);
-        } else
+        } else {
             extract_separate_forks(x, i);
+        }
     }
 
     free(shared_done);

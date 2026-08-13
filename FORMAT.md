@@ -206,13 +206,12 @@ epoch.
 - Fork sizes and payload offset retain their common offsets.
 - The fixed body ends at `+0x7c`; the primary name length is at `+0x7a`.
 - `+0x58` is the destination reference. It usually names a `DVCT` ID.
-- The original 68K loader copies this field to internal record offset `+0x52`.
-  Its consumers treat the value as an installer destination, not necessarily
-  as a catalog directory.
-- A few records use opaque destination-object IDs for which the archive has no
-  corresponding `DVCT`. For portable extraction, `unvise` recovers their
-  display directory from catalog preorder. This is an output-path policy, not
-  a decoded parent link.
+- The original 68K loader copies this field into its runtime destination
+  object; it is not unconditionally a catalog directory ID.
+- A custom folder icon (`Icon\r`, Finder type `icon`, creator `MACS`) carries
+  that runtime object rather than a `DVCT` ID. The operation applies to the
+  immediately preceding directory in catalog preorder. `unvise` recognizes
+  this case explicitly and rejects other unresolved destination objects.
 
 ### Action records
 
@@ -451,9 +450,9 @@ Processing order:
 - Carbon catalog layout follows the low SVCT revision byte: the original VISE
   7.3 PPC loader uses the ordinary layout at revision 11, while the VISE 8
   layout begins at revision 12. VISE 8.5 uses revision 14.
-- Lite records whose destination reference has no corresponding directory are
-  grouped by catalog preorder. The original installer resolves those opaque
-  references through installation policy that is not represented by a `DVCT`.
+- Lite custom-folder-icon destination objects are resolved against the
+  immediately preceding directory. Other unresolved Lite destinations are
+  rejected.
 - Both recovered VISE 8.0.2 PPC loaders read `0xa0`-byte `DVCT` bodies at
   revision 12. Both recovered VISE 8.5 loaders read `0xa4`-byte bodies at
   revision 14. Revision 13 has not been observed and is rejected rather than
