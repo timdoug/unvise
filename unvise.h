@@ -23,9 +23,10 @@ typedef struct {
 typedef struct {
     size_t off, end;
     char tag[5];
-    char *name;
+    char *name, *path;
     bool file;
     uint32_t parent, dir_id, payload;
+    uint16_t depth, fixed_size;
     uint32_t packed[2], expanded[2];
     uint32_t gap;
 } Record;
@@ -72,10 +73,11 @@ bool catalog_is_packed(CatalogLayout layout);
 bool catalog_has_vise8_payloads(CatalogLayout layout);
 CatalogLayout catalog_pef_layout(Buffer data);
 CatalogLayout catalog_direct_layout(Buffer data, size_t offset);
-Record *catalog(Buffer data, size_t offset, CatalogLayout layout, bool raw_names, size_t *count);
+Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,
+                size_t *count);
 void print_quoted(const char *s, bool raw);
-char *output_path(const Options *options, Record *records, size_t count, size_t index,
-                  const char *fork);
+char *output_path(const Options *options, Record *records, size_t index, const char *fork,
+                  const char *variant);
 int run_installer(const Options *options, const char *input_path);
 
 #endif

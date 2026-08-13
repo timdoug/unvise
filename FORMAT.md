@@ -45,9 +45,11 @@ records.
 Catalog compression is indicated by the nonzero field at `CVCT+0x08`, not by
 the presence of a `PACK` record.
 
-No authoritative record-length field has been identified. `unvise` finds
-record boundaries by scanning for those four tags. Tag-like bytes in an
-unknown catalog variant could therefore be misidentified.
+`CVCT+0x10` contains the number of `DVCT` and `FVCT` records. Records are parsed
+mechanically from that count, version-specific fixed bodies, declared string
+lengths, and action-specific variable fields, following the original PPC and
+68K loaders. Each computed boundary must contain the expected next signature;
+embedded tag-like bytes cannot create false records.
 
 ## CVCT catalog header
 
@@ -56,6 +58,7 @@ unknown catalog variant could therefore be misidentified.
 | `+0x00` | 4 | `CVCT` signature |
 | `+0x04` | 4 | compressed stream length when `+0x08` is nonzero |
 | `+0x08` | 4 | nonzero when the catalog is compressed |
+| `+0x10` | 2 | number of `DVCT` and `FVCT` records |
 | `+0x64` | variable | word-swapped raw-DEFLATE stream when compressed |
 
 A compressed catalog expands to ordinary `DVCT`, `FVCT`, and `PACK` records.
@@ -84,10 +87,20 @@ its catalog contains a `PACK` record.
 | `+0x00` | 4 | `DVCT` signature |
 | `+0x1c` | 4 | directory ID |
 | `+0x20` | 4 | parent directory ID |
+| `+0x50` | 1 | primary trailing-name length |
 | `+0x94` | variable | MacRoman name |
 
 For a compressed catalog, the name moves to `+0x98`; observed VISE 8 records
-use `+0xa0` or `+0xa4`. The ID fields do not move.
+use `+0xa0` or `+0xa4`.
+
+VISE 8 stores records in preorder and gives each directory an explicit nesting
+depth in the high 16 bits at `+0x48`. Directory IDs remain at `+0x1c`, but the
+preorder depth is sufficient to reconstruct the tree and is used by the
+original PPC loaders.
+
+The VISE 8.0.2 directory body is `0xa0` bytes and the VISE 8.5 body is `0xa4`
+bytes. The primary and optional secondary trailing-name lengths are bytes at
+`+0x50` and `+0x4f` respectively.
 
 ### Compact catalog
 
@@ -95,14 +108,14 @@ use `+0xa0` or `+0xa4`. The ID fields do not move.
 - Their directory records are only `0x5b` to `0x68` bytes long, ruling out the
   normal layout's name at `+0x94`.
 - Directory and parent IDs remain at `+0x1c` and `+0x20`.
+- The primary name length remains at `+0x50`.
 - The MacRoman name begins at `+0x58`, or `+0x68` when the record contains the
   observed 16-byte extension.
 
 ### Lite 3.6 short catalog
 
 - Directory and parent IDs remain at `+0x1c` and `+0x20`.
-- The name is stored at the end of the record.
-- Its representation is one length byte, seven reserved bytes, then the name.
+- The fixed body ends at `+0x58`; the primary name length is at `+0x50`.
 
 ## FVCT file or action record
 
@@ -119,10 +132,20 @@ use `+0xa0` or `+0xa4`. The ID fields do not move.
 | `+0x58` | 4 | parent directory ID or install-location token |
 | `+0x64` | 4 | payload offset in the data fork |
 | `+0x68` | 4 | VISE 7 version-source gap size |
+| `+0x7a` | 1 | primary trailing-name length |
 | `+0xba` | variable | MacRoman name |
 
 For a compressed catalog, the name moves to `+0xbe`; VISE 8 moves it eight
 bytes farther to `+0xc6`. The fork and payload fields do not move.
+
+In VISE 8, the high 16 bits at `+0x60` are the preorder nesting depth. VISE
+8.5 repurposes `+0x58`; it must not be interpreted as a parent ID. The original
+PPC loaders reconstruct hierarchy from the explicit depth fields.
+
+The primary trailing-name length is consistently the byte at `+0x7a`. The
+VISE 8 fixed file/action body is `0xc6` bytes and can carry an optional
+secondary-name length at `+0xb9`. Action subtypes have mechanically parsed
+variable strings and message fields, also following the original loaders.
 
 ### Compact catalog
 
@@ -136,7 +159,7 @@ bytes farther to `+0xc6`. The fork and payload fields do not move.
 ### Lite 3.6 short catalog
 
 - Fork sizes and payload offset retain their common offsets.
-- The name is stored at the end as one length byte, `0x2c`, then the name.
+- The fixed body ends at `+0x7c`; the primary name length is at `+0x7a`.
 - Most records store their parent ID at `+0x58`.
 - Some records store an install-location token at `+0x58`; `unvise` then
   infers the containing directory from catalog order.
@@ -166,6 +189,21 @@ Several `FVCT` records may reference one compressed member:
 - For combined-fork groups, packed field 0 holds the compressed size and
   packed field 1 may hold the total expanded size.
 - For resource-only groups, packed field 1 holds the compressed size.
+
+### Conditional path collisions
+
+- Multiple file records may intentionally target the same logical pathname.
+  They represent alternatives selected by installer conditions, packages,
+  architecture, localization, or version checks.
+- Alternatives are not assumed identical. Divergent fork contents occur in
+  every affected catalog layout in the corpus.
+- `unvise` gives every output-bearing record a `~NNNN` suffix, where `NNNN` is
+  its stable catalog record number. This also prevents collisions on
+  case-insensitive or Unicode-normalizing filesystems. Data and resource forks
+  from one record retain the same suffix.
+- A version-source record can also participate in an ordinary shared payload.
+  Both byte sequences are retained; the version-source form has an additional
+  `-version` suffix.
 
 ### VISE 8 framed payloads
 

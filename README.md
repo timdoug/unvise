@@ -19,6 +19,14 @@ freeware, shareware, and demo installer archives; should be relatively comprehen
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.
 
+Every extracted file has a stable `~NNNN` catalog-record suffix. Installer
+catalogs contain conditional alternatives with the same logical pathname, and
+filesystems differ in case folding and Unicode normalization. Record-indexed
+names preserve every alternative without inventing installation policy or
+silently overwriting data. A `-version` suffix distinguishes the additional
+form carried by a version-source record when it differs from the same record's
+shared payload.
+
 ## Usage
 
 Build with a C99 compiler and zlib:
@@ -47,10 +55,10 @@ Extract it. By default, the extracted forks are raw files named `name.data` or
 $ ./unvise -x raw-output "$installer"
 SVCT version=1 size=5145057 catalog=0x4E6960
 $ find raw-output -type f | sort | head -n4
-raw-output/Escape Velocity 1.0.5 ƒ/ • READ ME • .data
-raw-output/Escape Velocity 1.0.5 ƒ/ • READ ME • .rsrc
-raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.data
-raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.rsrc
+raw-output/Escape Velocity 1.0.5 ƒ/ • READ ME • ~0004.data
+raw-output/Escape Velocity 1.0.5 ƒ/ • READ ME • ~0004.rsrc
+raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text~0007.data
+raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text~0007.rsrc
 ```
 
 Standard hidden AppleDouble
@@ -60,10 +68,10 @@ sidecars are also supported:
 $ ./unvise -a -x appledouble-output "$installer"
 SVCT version=1 size=5145057 catalog=0x4E6960
 $ find appledouble-output -type f | sort | head -4
-appledouble-output/Escape Velocity 1.0.5 ƒ/ • READ ME •
-appledouble-output/Escape Velocity 1.0.5 ƒ/._ • READ ME •
-appledouble-output/Escape Velocity 1.0.5 ƒ/._EV Data
-appledouble-output/Escape Velocity 1.0.5 ƒ/._EV Graphics
+appledouble-output/Escape Velocity 1.0.5 ƒ/ • READ ME • ~0004
+appledouble-output/Escape Velocity 1.0.5 ƒ/._ • READ ME • ~0004
+appledouble-output/Escape Velocity 1.0.5 ƒ/._EV Data~0014
+appledouble-output/Escape Velocity 1.0.5 ƒ/._EV Graphics~0015
 ```
 
 On macOS, both forks can be preserved in one native file:
@@ -73,7 +81,7 @@ $ ./unvise -n -x native-output "$installer"
 SVCT version=1 size=5145057 catalog=0x4E6960
 $ file=$(find native-output -type f -size +500k -print -quit)
 $ printf '%s\n' "$file"
-native-output/Escape Velocity 1.0.5 ƒ/Escape Velocity
+native-output/Escape Velocity 1.0.5 ƒ/Escape Velocity~0013
 $ stat -f 'data fork: %z bytes' "$file"
 data fork: 514331 bytes
 $ stat -f 'resource fork: %z bytes' "$file/..namedfork/rsrc"

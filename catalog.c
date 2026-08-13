@@ -74,52 +74,24 @@ static bool valid_name(Buffer data, size_t start, size_t end) {
     return true;
 }
 
-static char *record_name(Buffer data, Record *r, CatalogLayout layout, bool raw_names) {
-    if (layout == CATALOG_LITE &&
-        (!strcmp(r->tag, "FVCT") || !strcmp(r->tag, "DVCT"))) {
-        size_t trailer = !strcmp(r->tag, "FVCT") ? 2 : 8;
+static char *record_name(Buffer data, Record *r, bool raw_names) {
+    if (r->fixed_size) {
+        size_t length_offset;
 
-        for (size_t p = r->off + 4; p + trailer <= r->end; p++) {
-            size_t n = data.p[p];
+        if (!strcmp(r->tag, "FVCT")) {
+            length_offset = 0x7a;
+        } else if (!strcmp(r->tag, "DVCT")) {
+            length_offset = 0x50;
+        } else
+            return NULL;
 
-            if (p + trailer + n != r->end || (!strcmp(r->tag, "FVCT") && data.p[p + 1] != 0x2c))
-                continue;
-
-            return convert_name(data.p + p + trailer, n, raw_names);
-        }
-
-        return NULL;
-    }
-
-    static const uint8_t file_offsets[] = {0x7c, 0x8c, 0xba, 0xbe, 0xc6};
-    static const uint8_t directory_offsets[] = {0x58, 0x68, 0x94, 0x98, 0xa0, 0xa4};
-    const uint8_t *offsets;
-    size_t count;
-    size_t name_end = r->end;
-
-    if (name_end > r->off && data.p[name_end - 1] == 0)
-        name_end--;
-
-    if (!strcmp(r->tag, "FVCT")) {
-        offsets = file_offsets;
-        count = sizeof(file_offsets);
-    } else if (!strcmp(r->tag, "DVCT")) {
-        offsets = directory_offsets;
-        count = sizeof(directory_offsets);
-    } else
-        return NULL;
-
-    /*
-     * The fixed record body grew in several independently selected steps.
-     * Names always occupy the complete trailing field. Trying the observed
-     * field boundaries in order identifies the actual record shape locally;
-     * binary metadata before the name fails valid_name().
-     */
-    for (size_t i = 0; i < count; i++) {
-        size_t start = r->off + offsets[i];
-
-        if (valid_name(data, start, name_end))
-            return convert_name(data.p + start, name_end - start, raw_names);
+        if (!span(data, r->off + length_offset, 1))
+            return NULL;
+        size_t length = data.p[r->off + length_offset];
+        if (!length || r->fixed_size > r->end - r->off ||
+            length > r->end - r->off - r->fixed_size)
+            return NULL;
+        return convert_name(data.p + r->off + r->fixed_size, length, raw_names);
     }
 
     return NULL;
@@ -208,38 +180,298 @@ CatalogLayout catalog_pef_layout(Buffer data) {
     return CATALOG_VISE8;
 }
 
-static Record *scan_catalog(Buffer data, size_t offset, size_t *count) {
-    /*
-     * No authoritative record-length field has been identified. Boundaries
-     * are inferred by scanning for the four observed record tags.
-     */
-    size_t capacity = 32, n = 0;
+static bool vise8_next_tag(Buffer data, size_t offset, bool last) {
+    if (!span(data, offset, 4))
+        return false;
+    if (last)
+        return !memcmp(data.p + offset, "PACK", 4);
+    return !memcmp(data.p + offset, "DVCT", 4) || !memcmp(data.p + offset, "FVCT", 4);
+}
+
+static size_t vise8_file_size(Buffer data, size_t offset) {
+    const size_t fixed = 0xc6;
+
+    if (!span(data, offset, fixed))
+        die("truncated VISE 8 FVCT record");
+
+    size_t primary = data.p[offset + 0x7a];
+    size_t variable = data.p[offset + 0x7b];
+    size_t secondary = data.p[offset + 0xb9];
+    unsigned type = data.p[offset + 0x75];
+    size_t size = fixed + primary;
+    uint32_t record_type = be32(data, offset + 4);
+    bool parameter = (be32(data, offset + 0x44) == UINT32_C(0x00010001) ||
+                      be32(data, offset + 0x44) == UINT32_C(0x00020001) ||
+                      be32(data, offset + 0x44) == UINT32_C(0x00040001)) &&
+                     be32(data, offset + 0x4c) == UINT32_C(0x00010001);
+    bool file = !parameter &&
+                (record_type == 0 || record_type >= UINT32_C(0x00010000)) &&
+                (record_type >> 24) != 3;
+
+    if (file) {
+        size += secondary;
+        if (!span(data, offset, size))
+            die("truncated VISE 8 FVCT variable fields");
+        return size;
+    }
+
+    switch (type) {
+    case 3:
+    case 5:
+    case 9:
+    case 10: {
+        size_t length_offset = size + variable;
+
+        if (!span(data, offset + length_offset, 1))
+            die("truncated VISE 8 action string");
+        size = length_offset + 1 + data.p[offset + length_offset];
+        break;
+    }
+    case 6:
+        size += variable + be16(data, offset + 0x2e) + be16(data, offset + 0x32) +
+                be16(data, offset + 0x38);
+        break;
+    case 13:
+        size += variable + secondary;
+        break;
+    default:
+        size += secondary;
+        break;
+    }
+
+    if (!span(data, offset, size))
+        die("truncated VISE 8 FVCT variable fields");
+    return size;
+}
+
+static size_t vise8_directory_size(Buffer data, size_t offset, bool last, uint16_t *fixed) {
+    if (!span(data, offset, 0xa4))
+        die("truncated VISE 8 DVCT record");
+
+    size_t names = (size_t)data.p[offset + 0x4f] + data.p[offset + 0x50];
+    size_t old_size = 0xa0 + names;
+    size_t new_size = 0xa4 + names;
+    bool old_valid = vise8_next_tag(data, offset + old_size, last);
+    bool new_valid = vise8_next_tag(data, offset + new_size, last);
+
+    if (old_valid == new_valid)
+        die("ambiguous or invalid VISE 8 DVCT length");
+    *fixed = old_valid ? 0xa0 : 0xa4;
+    return old_valid ? old_size : new_size;
+}
+
+static Record *parse_vise8_catalog(Buffer data, size_t expected, size_t *count) {
+    Record *records = calloc(expected + 1, sizeof(*records));
+    size_t offset = 0;
+
+    if (!records)
+        die("out of memory");
+    for (size_t i = 0; i < expected; i++) {
+        if (!span(data, offset, 4))
+            die("truncated VISE 8 catalog");
+
+        Record *record = &records[i];
+        record->off = offset;
+        memcpy(record->tag, data.p + offset, 4);
+        record->tag[4] = 0;
+
+        bool last = i + 1 == expected;
+        if (!strcmp(record->tag, "FVCT")) {
+            record->fixed_size = 0xc6;
+            offset += vise8_file_size(data, offset);
+        } else if (!strcmp(record->tag, "DVCT"))
+            offset += vise8_directory_size(data, offset, last, &record->fixed_size);
+        else
+            die("invalid VISE 8 catalog record signature");
+
+        if (!vise8_next_tag(data, offset, last))
+            die("invalid VISE 8 catalog record length");
+    }
+
+    records[expected].off = offset;
+    memcpy(records[expected].tag, "PACK", 5);
+    *count = expected + 1;
+    return records;
+}
+
+static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
+    if (!span(data, offset, fixed))
+        die("truncated FVCT record");
+
+    size_t primary = data.p[offset + 0x7a];
+    size_t variable = fixed > 0x7b ? data.p[offset + 0x7b] : 0;
+    size_t secondary = fixed > 0xb9 ? data.p[offset + 0xb9] : 0;
+    unsigned type = fixed > 0x75 ? data.p[offset + 0x75] : 0;
+    size_t size = fixed + primary;
+    uint32_t record_type = be32(data, offset + 4);
+    bool parameter = (be32(data, offset + 0x44) == UINT32_C(0x00010001) ||
+                      be32(data, offset + 0x44) == UINT32_C(0x00020001) ||
+                      be32(data, offset + 0x44) == UINT32_C(0x00040001)) &&
+                     be32(data, offset + 0x4c) == UINT32_C(0x00010001);
+    bool file = !parameter &&
+                (record_type == 0 || record_type >= UINT32_C(0x00010000)) &&
+                (record_type >> 24) != 3;
+
+    if (file) {
+        size += secondary;
+        if (!span(data, offset, size))
+            die("truncated FVCT variable fields");
+        return size;
+    }
+
+    switch (type) {
+    case 1:
+    case 4:
+    case 8:
+        size += variable;
+        break;
+    case 2:
+        if ((record_type >> 24) != 3)
+            size += variable;
+        break;
+    case 3:
+    case 5:
+    case 9:
+    case 10: {
+        size_t length_offset = size + variable;
+
+        if (!span(data, offset + length_offset, 1))
+            die("truncated action string");
+        size = length_offset + 1 + data.p[offset + length_offset];
+        break;
+    }
+    case 6:
+        size += variable + be16(data, offset + 0x2e) + be16(data, offset + 0x32) +
+                be16(data, offset + 0x38);
+        break;
+    case 13:
+        size += variable + secondary;
+        break;
+    default:
+        size += secondary;
+        break;
+    }
+
+    if (!span(data, offset, size))
+        die("truncated FVCT variable fields");
+    return size;
+}
+
+static bool semantic_tag(Buffer data, size_t offset) {
+    return span(data, offset, 4) &&
+           (!memcmp(data.p + offset, "DVCT", 4) || !memcmp(data.p + offset, "FVCT", 4));
+}
+
+static size_t compact_record_size(Buffer data, size_t offset, bool directory, uint16_t *fixed) {
+    size_t short_fixed = directory ? 0x58 : 0x7c;
+    size_t long_fixed = short_fixed + 0x10;
+    size_t length_offset = directory ? 0x50 : 0x7a;
+
+    if (!span(data, offset + length_offset, 1))
+        die("truncated compact catalog record");
+    size_t names = data.p[offset + length_offset];
+    size_t short_size;
+    size_t long_size;
+
+    if (directory) {
+        short_size = short_fixed + names;
+        long_size = long_fixed + names;
+    } else {
+        uint32_t record_type = be32(data, offset + 4);
+        bool parameter = (be32(data, offset + 0x44) == UINT32_C(0x00010001) ||
+                          be32(data, offset + 0x44) == UINT32_C(0x00020001) ||
+                          be32(data, offset + 0x44) == UINT32_C(0x00040001)) &&
+                         be32(data, offset + 0x4c) == UINT32_C(0x00010001);
+        bool file = !parameter &&
+                    (record_type == 0 || record_type >= UINT32_C(0x00010000)) &&
+                    (record_type >> 24) != 3;
+
+        if (!file && (data.p[offset + 0x75] == 4 || data.p[offset + 0x75] == 6)) {
+            size_t extra = be16(data, offset + 0x38);
+
+            if (data.p[offset + 0x75] == 6)
+                extra += be16(data, offset + 0x2e) + be16(data, offset + 0x32);
+            short_size = short_fixed + names + extra;
+            long_size = long_fixed + names + extra;
+        } else {
+            short_size = variable_file_size(data, offset, short_fixed);
+            long_size = variable_file_size(data, offset, long_fixed);
+        }
+    }
+    bool short_valid = semantic_tag(data, offset + short_size) ||
+                       (span(data, offset + short_size, 4) &&
+                        !memcmp(data.p + offset + short_size, "PACK", 4));
+    bool long_valid = semantic_tag(data, offset + long_size) ||
+                      (span(data, offset + long_size, 4) &&
+                       !memcmp(data.p + offset + long_size, "PACK", 4));
+
+    if (short_valid == long_valid)
+        die("ambiguous or invalid compact catalog record length");
+    *fixed = short_valid ? (uint16_t)short_fixed : (uint16_t)long_fixed;
+    return short_valid ? short_size : long_size;
+}
+
+static Record *parse_catalog_records(Buffer data, size_t offset, size_t expected,
+                                     CatalogLayout layout, size_t *count) {
+    size_t capacity = expected + 3;
     Record *records = calloc(capacity, sizeof(*records));
+    size_t n = 0, position = offset;
 
     if (!records)
         die("out of memory");
 
-    for (size_t position = offset; position + 4 <= data.n;) {
-        while (position + 4 <= data.n && !is_tag(data.p + position))
-            position++;
-        if (position + 4 > data.n)
-            break;
-
-        if (n == capacity) {
-            capacity *= 2;
-            records = realloc(records, capacity * sizeof(*records));
-            if (!records)
-                die("out of memory");
-            memset(records + n, 0, (capacity - n) * sizeof(*records));
-        }
-
+    if (span(data, position, 4) && !memcmp(data.p + position, "CVCT", 4)) {
         records[n].off = position;
-        memcpy(records[n].tag, data.p + position, 4);
-        records[n].tag[4] = 0;
+        memcpy(records[n].tag, "CVCT", 5);
         n++;
-        position += 4;
+        position += 0x14;
+
+        if (span(data, position, 4) && !memcmp(data.p + position, "PACK", 4)) {
+            if (!span(data, position, 0x50) || !semantic_tag(data, position + 0x50))
+                die("invalid leading PACK record");
+            records[n].off = position;
+            memcpy(records[n].tag, "PACK", 5);
+            n++;
+            position += 0x50;
+        }
     }
 
+    for (size_t i = 0; i < expected; i++) {
+        if (!semantic_tag(data, position))
+            die("invalid catalog record signature");
+
+        Record *record = &records[n++];
+        bool directory = !memcmp(data.p + position, "DVCT", 4);
+        record->off = position;
+        memcpy(record->tag, data.p + position, 4);
+        record->tag[4] = 0;
+
+        if (layout == CATALOG_COMPACT)
+            position += compact_record_size(data, position, directory, &record->fixed_size);
+        else if (directory) {
+            size_t fixed = layout == CATALOG_LITE ? 0x58 :
+                           layout == CATALOG_NORMAL ? 0x94 : 0x98;
+
+            if (!span(data, position + 0x50, 1))
+                die("truncated DVCT record");
+            record->fixed_size = (uint16_t)fixed;
+            position += fixed + data.p[position + 0x50];
+        } else {
+            size_t fixed = layout == CATALOG_LITE ? 0x7c :
+                           layout == CATALOG_NORMAL ? 0xba : 0xbe;
+            record->fixed_size = (uint16_t)fixed;
+            position += variable_file_size(data, position, fixed);
+        }
+
+        if (i + 1 < expected && !semantic_tag(data, position))
+            die("invalid catalog record length");
+    }
+
+    if (!span(data, position, 4) || memcmp(data.p + position, "PACK", 4))
+        die("catalog lacks trailing PACK record");
+    records[n].off = position;
+    memcpy(records[n].tag, "PACK", 5);
+    n++;
     *count = n;
     return records;
 }
@@ -276,6 +508,8 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
     record->file = !parameter_record && (type == 0 || type >= UINT32_C(0x00010000)) &&
                    (type >> 24) != 3;
     record->parent = be32(data, record->off + (layout == CATALOG_COMPACT ? 0x60 : 0x58));
+    if (layout == CATALOG_VISE8)
+        record->depth = be16(data, record->off + 0x60);
 
     if (record->end - record->off >= 0x70 &&
         !memcmp(data.p + record->off + 0x2c, "issp", 4) && be32(data, record->off + 0x68) &&
@@ -289,13 +523,42 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
         Record *record = &records[i];
 
         record->end = i + 1 < count ? records[i + 1].off : data.n;
-        record->name = record_name(data, record, layout, raw_names);
+        record->name = record_name(data, record, raw_names);
 
         if (!strcmp(record->tag, "DVCT") && record->end - record->off >= 0x24) {
             record->dir_id = be32(data, record->off + 0x1c);
             record->parent = be32(data, record->off + 0x20);
+            if (layout == CATALOG_VISE8)
+                record->depth = be16(data, record->off + 0x48);
         } else if (!strcmp(record->tag, "FVCT"))
             decode_file_record(data, record, layout);
+    }
+
+    if (layout == CATALOG_VISE8) {
+        /*
+         * The VISE 8 PPC loaders read the nesting level from +0x48 in DVCT
+         * and +0x60 in FVCT. Records are stored in preorder. VISE 8.5 uses
+         * the older FVCT parent-ID field for unrelated metadata, so the
+         * explicit level is the authoritative hierarchy representation.
+         */
+        uint32_t *parents = calloc(count + 1, sizeof(*parents));
+
+        if (!parents)
+            die("out of memory");
+        for (size_t i = 0; i < count; i++) {
+            Record *record = &records[i];
+
+            if (strcmp(record->tag, "DVCT") && strcmp(record->tag, "FVCT"))
+                continue;
+            if (record->depth > count || (record->depth && !parents[record->depth - 1]))
+                die("invalid VISE 8 catalog depth");
+            record->parent = record->depth ? parents[record->depth - 1] : 0;
+            if (!strcmp(record->tag, "DVCT")) {
+                record->dir_id = (uint32_t)i + 1;
+                parents[record->depth] = record->dir_id;
+            }
+        }
+        free(parents);
     }
 }
 
@@ -336,16 +599,6 @@ static void repair_lite_parents(Record *records, size_t count) {
         else if (current_dir)
             record->parent = current_dir;
     }
-}
-
-Record *catalog(Buffer data, size_t offset, CatalogLayout layout, bool raw_names, size_t *count) {
-    Record *records = scan_catalog(data, offset, count);
-
-    decode_records(data, records, *count, layout, raw_names);
-    if (layout == CATALOG_LITE)
-        repair_lite_parents(records, *count);
-
-    return records;
 }
 
 static char *safe_name(const char *name, bool flat) {
@@ -392,11 +645,10 @@ static Record *dir_by_id(Record *r, size_t n, uint32_t id) {
     return NULL;
 }
 
-char *output_path(const Options *o, Record *all, size_t count, size_t index,
-                         const char *fork) {
+static char *record_relative_path(Record *all, size_t count, size_t index) {
     Record *r = &all[index];
     char *name = record_path_name(all, r);
-    size_t cap = strlen(o->out) + strlen(name) + 128;
+    size_t cap = strlen(name) + 128;
     char **parts = calloc(count, sizeof(char *));
     size_t np = 0;
     uint32_t parent = r->parent;
@@ -414,20 +666,81 @@ char *output_path(const Options *o, Record *all, size_t count, size_t index,
     char *path = malloc(cap);
     if (!path)
         die("out of memory");
-    strcpy(path, o->out);
+    *path = 0;
     for (size_t i = np; i; i--) {
-        strcat(path, "/");
+        if (*path)
+            strcat(path, "/");
         strcat(path, parts[i - 1]);
         free(parts[i - 1]);
     }
-    strcat(path, "/");
+    if (*path)
+        strcat(path, "/");
     strcat(path, name);
+    free(parts);
+    free(name);
+    return path;
+}
+
+static bool record_outputs_fork(const Record *record) {
+    return !strcmp(record->tag, "FVCT") && record->file &&
+           (record->expanded[0] || record->expanded[1]) &&
+           (record->packed[0] || record->packed[1]);
+}
+
+static void append_record_suffix(Record *record, size_t index) {
+    char suffix[32];
+    snprintf(suffix, sizeof(suffix), "~%04zu", index);
+    size_t n = strlen(record->path);
+    char *path = realloc(record->path, n + strlen(suffix) + 1);
+
+    if (!path)
+        die("out of memory");
+    record->path = path;
+    strcpy(record->path + n, suffix);
+}
+
+static void plan_output_paths(Record *all, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        all[i].path = record_relative_path(all, count, i);
+        if (record_outputs_fork(&all[i]))
+            append_record_suffix(&all[i], i);
+    }
+}
+
+Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,
+                size_t *count) {
+    Record *records = layout == CATALOG_VISE8 ? parse_vise8_catalog(data, expected, count) :
+                                               parse_catalog_records(data, offset, expected, layout,
+                                                                     count);
+
+    decode_records(data, records, *count, layout, raw_names);
+    if (layout == CATALOG_LITE)
+        repair_lite_parents(records, *count);
+    plan_output_paths(records, *count);
+
+    return records;
+}
+
+char *output_path(const Options *o, Record *all, size_t index, const char *fork,
+                  const char *variant) {
+    const char *relative = all[index].path;
+    size_t cap = strlen(o->out) + strlen(relative) + 128;
+    char *path = malloc(cap);
+
+    if (!path)
+        die("out of memory");
+
+    strcpy(path, o->out);
+    strcat(path, "/");
+    strcat(path, relative);
+    if (variant) {
+        strcat(path, "-");
+        strcat(path, variant);
+    }
     if (!o->native && !o->appledouble) {
         strcat(path, ".");
         strcat(path, fork);
     }
     make_parent_dir(path);
-    free(parts);
-    free(name);
     return path;
 }

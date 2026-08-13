@@ -45,13 +45,18 @@ static void check_payload(const Extraction *x, size_t offset, size_t packed_size
         die("payload overlaps catalog");
 }
 
-static void write_fork(const Extraction *x, size_t index, int fork, const uint8_t *data,
-                       size_t size) {
+static void write_fork_variant(const Extraction *x, size_t index, int fork, const uint8_t *data,
+                               size_t size, const char *variant) {
     const char *kind = fork ? "rsrc" : "data";
-    char *path = output_path(x->options, x->records, x->count, index, kind);
+    char *path = output_path(x->options, x->records, index, kind, variant);
 
     write_output(x->options, path, kind, data, size);
     free(path);
+}
+
+static void write_fork(const Extraction *x, size_t index, int fork, const uint8_t *data,
+                       size_t size) {
+    write_fork_variant(x, index, fork, data, size, NULL);
 }
 
 static void extract_version_source(const Extraction *x, size_t index) {
@@ -68,9 +73,10 @@ static void extract_version_source(const Extraction *x, size_t index) {
         inflate_member(slice(x->data, record->payload, record->packed[0]), x->table, total);
 
     if (record->expanded[0])
-        write_fork(x, index, 0, expanded.p, record->expanded[0]);
+        write_fork_variant(x, index, 0, expanded.p, record->expanded[0], "version");
     if (record->expanded[1])
-        write_fork(x, index, 1, expanded.p + resource_start, record->expanded[1]);
+        write_fork_variant(x, index, 1, expanded.p + resource_start, record->expanded[1],
+                           "version");
 
     free(expanded.p);
 }
@@ -291,8 +297,10 @@ static void load_table(Extraction *x, Buffer data0, bool direct_table, bool has_
 }
 
 static void free_records(Record *records, size_t count) {
-    for (size_t i = 0; i < count; i++)
+    for (size_t i = 0; i < count; i++) {
         free(records[i].name);
+        free(records[i].path);
+    }
     free(records);
 }
 
@@ -328,6 +336,8 @@ int run_installer(const Options *options, const char *input_path) {
 
     printf("SVCT version=%" PRIu32 " size=%zu catalog=0x%X\n", version, input.n, catalog_offset);
 
+    size_t catalog_records = be16(input, catalog_offset + 0x10);
+
     Extraction x = {
         .options = options,
         .data = input,
@@ -352,7 +362,8 @@ int run_installer(const Options *options, const char *input_path) {
     }
 
     if (options->list || options->out) {
-        x.records = catalog(catalog_data, record_offset, x.layout, options->raw_names, &x.count);
+        x.records = catalog(catalog_data, record_offset, catalog_records, x.layout,
+                            options->raw_names, &x.count);
         load_table(&x, data0, direct_table, has_data0);
         extract_records(&x);
         free_records(x.records, x.count);
