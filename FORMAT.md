@@ -5,8 +5,8 @@ This documents the subset implemented by `unvise`. Unless noted otherwise:
 - Integers are unsigned and big-endian.
 - Offsets prefixed with `+` are relative to the start of a record.
 - Catalog names use MacRoman.
-- Record boundaries are computed from the original loaders' fixed structures
-  and declared variable-field lengths.
+- Record boundaries are computed from revision-specific fixed structures and
+  declared variable-field lengths.
 
 ## Input forks
 
@@ -23,24 +23,14 @@ Accepted representations:
 - `Installer` plus `._Installer` AppleDouble from `unar -k hidden`.
 - Raw `Installer.data` plus `Installer.rsrc` from `macunpack -f`.
 
-For a raw pair, the command-line input may name the stem, `.data` file, or
-`.rsrc` file; all resolve to the `.data` fork and its matching `.rsrc` fork.
-
 MacBinary, BinHex, and StuffIt are outer formats and must be removed first.
-
-Output representations are raw `.data`/`.rsrc` fork pairs by default, hidden
-AppleDouble sidecars with `-a`, or native macOS forks with `-n`. Native output
-preserves Finder information and creation/modification times for files and
-directories. AppleDouble preserves Finder information and resource forks;
-AppleDouble and raw output apply the catalog modification time to each
-ordinary filesystem object. Only native output preserves creation time.
 
 ## SVCT data fork
 
 | Offset | Size | Meaning |
 | ---: | ---: | --- |
 | `0x00` | 4 | `SVCT` signature |
-| `0x04` | 4 | archive version (`1` in the corpus) |
+| `0x04` | 4 | archive version (`1` in supported files) |
 | `0x10` | 4 | format flags and revision; low byte is the catalog revision |
 | `0x24` | 4 | catalog offset |
 
@@ -51,11 +41,11 @@ records.
 Catalog compression is indicated by the nonzero field at `CVCT+0x08`, not by
 the presence of a `PACK` record.
 
-`CVCT+0x10` contains the number of `DVCT` and `FVCT` records. Version-specific
-fixed bodies come directly from the recovered loaders. Variable tails are
-calculated from declared lengths and the record subtype, then the expected next
-signature must occur at the computed boundary. A signature is never searched
-for, so embedded tag-like bytes cannot create a record.
+`CVCT+0x10` contains the number of `DVCT` and `FVCT` records. Fixed body sizes
+depend on the catalog revision. Variable tails are calculated from declared
+lengths and the record subtype, then the expected next signature must occur at
+the computed boundary. A signature is never searched for, so embedded tag-like
+bytes cannot create a record.
 
 ## CVCT catalog header
 
@@ -68,12 +58,12 @@ for, so embedded tag-like bytes cannot create a record.
 | `+0x64` | variable | word-swapped raw-DEFLATE stream when compressed |
 
 A compressed catalog expands to ordinary `DVCT`, `FVCT`, and `PACK` records.
-This form is present in the VISE 6.5, 7, and 8 corpus.
+This form is used by VISE 6.5, 7, and 8.
 
 Layout selection uses the low revision byte and the `CVCT+0x08` compression
 field; it does not inspect catalog contents for a likely structure:
 
-| Layout | Revision and storage | InstallerVISE versions in the corpus |
+| Layout | Revision and storage | InstallerVISE versions |
 | --- | --- | --- |
 | Lite | revision 0, uncompressed | Lite 3.6 |
 | Compact | revisions 2, 3, or 4, uncompressed | 4.2, 4.5, 4.6.1 |
@@ -81,9 +71,8 @@ field; it does not inspect catalog contents for a likely structure:
 | Compressed | revisions 5 through 11, word-swapped raw DEFLATE | 6.5, 7.0, 7.3 |
 | VISE 8 | revisions 12 or 14, compressed with later bodies | 8.0.2, 8.5 |
 
-Revision 1 and revision 13 have not been recovered or observed and are
-rejected. In particular, the verified VISE 5.0.1 installer has a normal
-uncompressed catalog even though its catalog contains a `PACK` record.
+Revision 1 and revision 13 are unsupported and rejected. VISE 5.0.1 uses a
+normal uncompressed catalog even when it contains a `PACK` record.
 
 ## DVCT directory record
 
@@ -100,29 +89,26 @@ uncompressed catalog even though its catalog contains a `PACK` record.
 | `+0x50` | 1 | primary trailing-name length |
 | `+0x94` | variable | MacRoman name |
 
-For a compressed catalog, the name moves to `+0x98`; observed VISE 8 records
-use `+0xa0` or `+0xa4`.
+For a compressed catalog, the name moves to `+0x98`; VISE 8 records use
+`+0xa0` or `+0xa4`.
 
 VISE 8 stores records in preorder and gives each directory an explicit nesting
 depth in the high 16 bits at `+0x48`. Directory IDs remain at `+0x1c`, but the
-preorder depth is sufficient to reconstruct the tree and is used by the
-original PPC loaders.
+preorder depth is sufficient to reconstruct the tree.
 
 The VISE 8.0.2 directory body is `0xa0` bytes and the VISE 8.5 body is `0xa4`
 bytes. The primary and optional secondary trailing-name lengths are bytes at
 `+0x50` and `+0x4f` respectively.
 
-The VISE 4.5 68K loader copies raw directory `+0x04..+0x13` into the internal
-Finder-information field and raw `+0x14/+0x18` into its creation/modification
-fields. The VISE 8.5 PPC loader independently performs the same 16-byte
-metadata copy. Directory metadata is applied after all children, in reverse
-catalog order, so creating a child cannot replace the restored parent mtime.
+Directory `+0x04..+0x13` contains Finder information; `+0x14` and `+0x18`
+contain creation and modification times. Directory metadata is applied after
+all children, in reverse catalog order, so creating a child cannot replace the
+restored parent mtime.
 
 ### Compact catalog
 
 - VISE 4.2, 4.5, and 4.6.1 installers use this layout.
-- The original 68K loaders select fixed body sizes from the low revision byte
-  at `SVCT+0x13`.
+- Fixed body sizes are selected by the low revision byte at `SVCT+0x13`.
 - Revisions 2 and 3 use `0x58`-byte directory bodies; revision 4 uses `0x68`.
 - Directory and parent IDs remain at `+0x1c` and `+0x20`.
 - The primary name length remains at `+0x50`.
@@ -130,8 +116,8 @@ catalog order, so creating a child cannot replace the restored parent mtime.
 
 ### Lite 3.6 short catalog
 
-- The original 68K loader reads a `0x58`-byte directory body and declared
-  trailing Pascal fields; boundaries are mechanical.
+- The record has a `0x58`-byte directory body followed by declared Pascal
+  fields.
 - Directory and parent IDs remain at `+0x1c` and `+0x20`.
 - The fixed body ends at `+0x58`; the primary name length is at `+0x50`.
 
@@ -163,31 +149,17 @@ For a compressed catalog, the name moves to `+0xbe`; VISE 8 moves it eight
 bytes farther to `+0xc6`. The fork and payload fields do not move.
 
 In VISE 8, the high 16 bits at `+0x60` are the preorder nesting depth. VISE
-8.5 repurposes `+0x58`; it must not be interpreted as a parent ID. The original
-PPC loaders reconstruct hierarchy from the explicit depth fields.
+8.5 repurposes `+0x58`; it must not be interpreted as a parent ID. Hierarchy is
+reconstructed from the explicit depth fields.
 
 The primary trailing-name length is consistently the byte at `+0x7a`. The
 VISE 8 fixed file/action body is `0xc6` bytes and can carry an optional
-secondary-name length at `+0xb9`. In both recovered VISE 8.5 PPC loaders,
-`BitTst(record + 0x0c, 4)` identifies an action and controls whether the byte
+secondary-name length at `+0xb9`. Classic bit 4 at `+0x0c` identifies an
+action and controls whether the byte
 at `+0x7b` and subtype-specific action fields follow the primary name. Classic
 bit numbering makes this mask `0x08000000` when the four bytes are read as a
-big-endian integer. The secondary name is read afterward. `unvise` follows
-that control flow directly and emits only records for which the action bit is
-clear.
-
-The VISE 4.5 68K loader independently copies raw `+0x0c` to internal `+0x8e`
-and calls `BitTst(internal + 0x8e, 4)` before selecting its action-tail path.
-The Lite 3.6 68K loader uses the same test and reads `0x78` bytes after the
-`FVCT` tag (`0x7c` including it), confirming both the marker and short fixed
-body without relying on corpus alignment.
-
-The same PPC loader copies raw `+0x3c` and `+0x40` to internal record fields
-`+0x42` and `+0x46`. File-creation paths pass those fields, in that order, to
-the classic catalog-info routine that sets creation and modification dates.
-The recovered VISE 4.5 68K loader performs the same two copies, independently
-confirming the layout. Native output converts the 1904 Mac epoch to the Unix
-epoch.
+big-endian integer. The secondary name is read afterward. File records have
+this bit clear. Timestamps use the classic Mac 1904 epoch.
 
 ### Compact catalog
 
@@ -201,13 +173,12 @@ epoch.
 
 ### Lite 3.6 short catalog
 
-- The original 68K loader reads a `0x7c`-byte file/action body and declared
-  trailing Pascal fields; boundaries are mechanical.
+- The record has a `0x7c`-byte file/action body followed by declared Pascal
+  fields.
 - Fork sizes and payload offset retain their common offsets.
 - The fixed body ends at `+0x7c`; the primary name length is at `+0x7a`.
 - `+0x58` is the destination reference. It usually names a `DVCT` ID.
-- The original 68K loader copies this field into its runtime destination
-  object; it is not unconditionally a catalog directory ID.
+- This is not unconditionally a catalog directory ID.
 - A custom folder icon (`Icon\r`, Finder type `icon`, creator `MACS`) carries
   that runtime object rather than a `DVCT` ID. The operation applies to the
   immediately preceding directory in catalog preorder. `unvise` recognizes
@@ -215,7 +186,7 @@ epoch.
 
 ### Action records
 
-`FVCT` also represents installer operations rather than files. Observed
+`FVCT` also represents installer operations rather than files. Known
 identifiers include:
 
 - Type `0x00008000`: message or location action.
@@ -246,8 +217,7 @@ Several `FVCT` records may reference one compressed member:
 - Multiple file records may intentionally target the same logical pathname.
   They represent alternatives selected by installer conditions, packages,
   architecture, localization, or version checks.
-- Alternatives are not assumed identical. Divergent fork contents occur in
-  every affected catalog layout in the corpus.
+- Alternatives are not assumed identical.
 - Records whose complete set of forks is byte-identical to an earlier record
   at the same logical pathname are omitted. The lowest-numbered distinct
   record retains the logical pathname. Later distinct records receive a
@@ -259,9 +229,7 @@ Several `FVCT` records may reference one compressed member:
 - Shared payload field 1 holds the complete expanded size.
 - The common fork-offset fields are authoritative; catalog order is not used
   to divide VISE 8 members.
-- Bytes not covered by a catalog record are not output. One MacPython member
-  contains an unreferenced duplicate of a file represented elsewhere in the
-  catalog.
+- Bytes not covered by a catalog record are not output.
 - A single data-only record can use the same framing and offset fields.
 
 ### File checksums
@@ -299,15 +267,14 @@ at their declared offsets and excludes the prefix.
 ### Lite 3.6
 
 - `DATA` resource 0 contains the 256-byte substitution permutation directly.
-- The verified RAM Charger archive places it at `DATA 0+0x4ac`.
-- `unvise` searches for a unique permutation instead of relying on that offset.
+- Its position is not fixed; it is identified as a 256-byte permutation.
 - No `CODE` 24 resource is required.
 
 ### VISE 4.2 through 7.0
 
 - `DATA` resource 0 is normally an `A89F000C` packed-code stream.
-- The verified 4.5 and 4.6.1 self-installers instead store the permutation
-  literally; this does not make their catalogs Lite records.
+- Some 4.5 and 4.6.1 self-installers instead store the permutation literally;
+  this does not make their catalogs Lite records.
 - A VISE 8.0.2 68K installer stores the three initialization streams directly
   in `DATA 0`, without either the packed-code wrapper or a literal table.
 - VISE 4.5 uses `CODE` 18 as its word dictionary and places the permutation
@@ -319,21 +286,9 @@ at their declared offsets and excludes the prefix.
 - Expanding `DATA` 0 produces three initialization streams.
 - The streams initialize a 256-byte substitution permutation in an emulated
   signed 16-bit A5-relative address space.
-- `DATA 0` does not identify the table by offset or symbol. The original 68K
-  decompressor references it as a compiled A5-relative global, and that address
-  changes between builds.
-
-Observed permutation addresses:
-
-| InstallerVISE | A5-relative address |
-| --- | ---: |
-| 5.0.1 | `-0x14b0` |
-| 5.5.2 | `-0x151c` |
-| 6.5 | `-0x15ca` |
-
-`unvise` identifies the sole initialized 256-byte permutation. Reproducing the
-original lookup more literally would require recognizing a build-specific
-machine-code reference and would not decode additional archive metadata.
+- `DATA 0` does not identify the table by offset or symbol. Its A5-relative
+  address varies between builds, so it is identified as the sole initialized
+  256-byte permutation.
 
 The initializer command byte is decoded exhaustively:
 
@@ -349,38 +304,30 @@ The initializer command byte is decoded exhaustively:
 
 ### VISE 7.3
 
-- `DATA` 0 and its initialization program are absent in the verified Carbon
-  installer.
-- The permutation is recovered from the initialized data of the input PEF
+- `DATA` 0 and its initialization program are absent.
+- The permutation is read from the initialized data of the input PEF
   application, as in VISE 8.
 - Catalog records retain the ordinary compressed-layout name offsets
   (`DVCT+0x98` and `FVCT+0xbe`).
-- The two independently recovered PPC catalog loaders read fixed `0x94`-byte
-  `DVCT` and `0xba`-byte `FVCT` bodies. The archive's low SVCT revision byte is
-  11; VISE 8 starts at revision 12.
+- Catalog records have fixed `0x94`-byte `DVCT` and `0xba`-byte `FVCT` bodies.
+  The low SVCT revision byte is 11; VISE 8 starts at revision 12.
 
 ### VISE 8.0.2
 
 - `DATA` 0 and its initialization program are absent.
 - The main PPC PEF application begins at data-fork offset `0x30`.
 - Expanding its packed-data section exposes the complete 256-byte permutation
-  as a static byte array. The analyzed MacPython 2.3.3 installer loads it at
-  `0x1006da7c`; a relocated global pointer at `0x1006bc90` refers to it.
-- As in the 68K implementation, the table address belongs to the compiled
-  application rather than to an InstallerVISE archive structure.
+  as a static byte array.
+- The table belongs to the compiled application rather than to an
+  InstallerVISE archive structure.
 - `Dcmp` 1005, labeled `Version 27 (PPC, decomp)`, obtains already-transformed
   16-bit words through the host application's read callback. It implements the
   DEFLATE-family decoder but does not contain or generate the permutation.
-- The embedded bytes exactly match the table independently reconstructed from
-  every earlier corpus version.
 - `unvise` parses the input PEF section headers, expands Apple's standard PEF
   packed-data opcodes, and locates the sole 256-byte permutation in the
-  expanded section. Following the original relocated pointer would require a
-  PEF relocation and machine-code analysis pass. No substitution table is
-  built into `unvise`.
+  expanded section. No substitution table is built into `unvise`.
 - A candidate is accepted only when all 256 byte values occur exactly once.
-  The catalog CRC-32 of every extracted file then independently validates the
-  selected table; all extractable corpus installers pass this check.
+  Catalog CRC-32 values validate the selected table during extraction.
 
 Relevant PEF structures:
 
@@ -406,7 +353,7 @@ repeated-zero/interleaved-literal.
 | `+0x00` | 4 | magic `0xa89f000c` |
 | `+0x08` | 4 | expanded size |
 | `+0x10` | 4 | control-stream offset |
-| `+0x14` | 4 | flags; observed high bits are `0x80000000` |
+| `+0x14` | 4 | flags; known high bits are `0x80000000` |
 | `+0x18` | variable | literal words |
 
 Control bytes select:
@@ -415,8 +362,8 @@ Control bytes select:
 - A word from the associated `CODE` dictionary.
 - A back-reference into already expanded output.
 
-The dictionary-base expression was recovered from the 68K unpacker and
-checked against the PowerPC implementation.
+The dictionary base is derived from the control code and associated `CODE`
+resource.
 
 ## Member compression
 
@@ -447,47 +394,24 @@ Processing order:
 - `unvise` parses Huffman symbols only to locate block boundaries, rewrites the
   representation, and leaves actual decompression to zlib.
 
-## Independent evidence
-
-- The 68K and PowerPC implementations both contain a standard DEFLATE block
-  dispatcher, literal/length and distance trees, and a 32 KiB window.
-- PowerPC parameter layout and 68K call sites agree on compressed size,
-  produced size, input/output callbacks, and progress callbacks.
-- The corpus includes installers using both decompressor implementations.
-
-## Unsupported or inferred behavior
+## Incomplete semantics
 
 - Password-protected members are unsupported.
-- The installer contains a conventional ZipCrypto path, but the Escape
-  Velocity installer has no `PsWd` resource and does not enable it.
-- Carbon catalog layout follows the low SVCT revision byte: the original VISE
-  7.3 PPC loader uses the ordinary layout at revision 11, while the VISE 8
-  layout begins at revision 12. VISE 8.5 uses revision 14.
+- Password handling uses a conventional ZipCrypto path, but is not
+  implemented.
+- Carbon catalog layout follows the low SVCT revision byte: VISE 7.3 uses the
+  ordinary layout at revision 11, VISE 8 begins at revision 12, and VISE 8.5
+  uses revision 14.
 - Lite custom-folder-icon destination objects are resolved against the
   immediately preceding directory. Other unresolved Lite destinations are
   rejected.
-- Both recovered VISE 8.0.2 PPC loaders read `0xa0`-byte `DVCT` bodies at
-  revision 12. Both recovered VISE 8.5 loaders read `0xa4`-byte bodies at
-  revision 14. Revision 13 has not been observed and is rejected rather than
-  assigned an inferred body size.
-- The fixed catalog structures and revision dispatch are loader-derived. The
-  complete semantics of every `FVCT` subtype and flag have not yet been named;
-  file/action classification and variable action tails reproduce the recovered
-  loader control flow and are checked against the following record signature.
-  Payload fork boundaries receive the stronger, independent check of each file
-  record's CRC-32.
-- Catalog names are converted with the complete MacRoman character mapping by
-  default. `-r` preserves their original bytes instead on
-  byte-oriented filesystems; modern macOS permits raw listing but not raw-name
-  extraction.
-- Native output preserves file and directory creation times, modification
-  times, and 16-byte Finder information. AppleDouble preserves Finder
-  information and resource forks. AppleDouble and raw output preserve
-  modification times using POSIX filesystem timestamps. AppleDouble entry ID
-  8 can represent dates historically, but current macOS `copyfile`/`dot_clean`
-  rejects sidecars containing it; interoperable output therefore omits it.
-  Directory permissions and installer-defined post-install actions are not
-  applied.
+- VISE 8.0.2 uses `0xa0`-byte `DVCT` bodies at revision 12. VISE 8.5 uses
+  `0xa4`-byte bodies at revision 14. Revision 13 is unsupported and rejected.
+- The complete semantics of every `FVCT` subtype and flag are not known.
+  File/action classification and variable action tails follow the format's
+  revision-specific structure and require the next record signature at the
+  computed boundary. Payload fork boundaries are checked by each file's
+  CRC-32.
 - Installer actions, conditions, and package selection are catalog semantics,
   not file payloads; `unvise` extracts all distinct file alternatives rather
   than executing that installation policy.
@@ -496,29 +420,5 @@ Processing order:
   bytes. Their nominal payload offsets do not identify stored members and the
   field at `+0x54` is not a fork CRC. They are installer-internal references,
   not extractable byte streams, and are listed but not emitted.
-- The corpus contains one VISE 6 Active Install stub in both StuffIt and
-  MacBinary wrappers. Its catalog refers outside the stub; the external archive
-  format and retrieval protocol have not been reverse-engineered.
-
-## Verified versions
-
-| InstallerVISE | Samples |
-| --- | --- |
-| Lite 3.6 | RAM Charger 8.1; IconDropper 3.0; BarbaBatch 3.1 Demo; UTC Display |
-| 4.2 | Internet Explorer 3.0a Java; OMS 2.3.2 Web |
-| 4.5 | PGP 5.0 Freeware; Installer VISE 4.5 |
-| 4.6.1 | Installer VISE 4.6.1 |
-| 5.0.1 | Mac F2C 1.4.1 |
-| 5.5 | Startup Lock 2.5; InstallerVISE 5.5 Demo |
-| 5.5.1 | BBEdit 5.0 Demo |
-| 5.5.2 | Escape Velocity 1.0.5; MacPipes 2.2.7; IntelliNews 1.1.1; FreeMIDI 1.43 |
-| 6.0 | InstallerVISE 6.0 Demo and Active Install demo |
-| 6.0.1 | InstallerVISE 6.0.1 |
-| 6.5 | Visual Projector 2.0; InstallerVISE 6.5 Demo; iControl 1.2 |
-| 7.0 | Interarchy 4.0; Interarchy 3.8 |
-| 7.0.1 | Tcl/Tk 8.3.2p1 Runtime and Web installers |
-| 7.2 | Tcl/Tk 8.3.3 Runtime installer |
-| 7.3 | HP LaserJet 4/5/6 legacy driver |
-| 7.4 | Tcl/Tk 8.3.4 Full installer |
-| 8.0.2 | MacPython 2.2.3; MacPython 2.3.3; Tcl/Tk 8.3.5 Runtime/Full and 8.4.1 Web installers |
-| 8.5 | Installer VISE 8.5 |
+- Active Install catalogs can refer to an external archive. Its container and
+  retrieval protocol are unsupported.

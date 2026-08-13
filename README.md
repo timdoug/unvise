@@ -1,15 +1,14 @@
 # unvise
 
 `unvise` extracts classic Macintosh InstallerVISE archives on modern macOS and
-other Linux/BSD/POSIX systems. It reads and writes native macOS forks where supported, AppleDouble
-sidecars, and raw `.data`/`.rsrc` fork pairs. I've tested it against 36
-freeware, shareware, and demo installer archives; should be relatively comprehensive, but no promises, patches encouraged!
+Linux, BSD, and other POSIX systems. It reads and writes native macOS forks,
+AppleDouble sidecars, and raw `.data`/`.rsrc` fork pairs.
 
 Expanded files are verified against the CRC-32 stored in their catalog
-records. Native output preserves classic Finder information and
-creation/modification times for files and directories. AppleDouble preserves
-Finder information and resource forks; AppleDouble and raw output also apply
-the modification time to each ordinary filesystem object.
+records. Directory hierarchy, Finder information, and timestamps are preserved
+where the selected output format supports them.
+
+Compatibility has been verified with freeware, shareware, and demo installers:
 
 | InstallerVISE | Supported format features |
 | --- | --- |
@@ -24,13 +23,6 @@ the modification time to each ordinary filesystem object.
 
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.
-
-Files normally retain their catalog names. When several records target the
-same pathname, byte-identical records are omitted. The lowest-numbered distinct
-record keeps the original name and later distinct alternatives receive a
-stable `~NNNN` catalog-record suffix. This preserves every meaningful
-alternative without inventing installation policy or silently overwriting
-data.
 
 ## Usage
 
@@ -66,8 +58,7 @@ raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.data
 raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.rsrc
 ```
 
-Standard hidden AppleDouble
-sidecars are also supported:
+Standard hidden AppleDouble sidecars are also supported:
 
 ```console
 $ ./unvise -a -x appledouble-output "$installer"
@@ -93,16 +84,10 @@ $ stat -f 'resource fork: %z bytes' "$file/..namedfork/rsrc"
 resource fork: 500871 bytes
 ```
 
-Names are converted from MacRoman to UTF-8 by default. Linux VFS treats a
-filename as opaque bytes except for NUL and `/`, although a mounted filesystem
-may impose additional rules. On such a filesystem, `-r` writes the
-original MacRoman bytes; UTF-8 tools may display them incorrectly.
-
-Modern macOS APFS and HFS+ path handling requires valid Unicode filenames
-represented as UTF-8. A raw MacRoman byte such as `0xC4` is not valid UTF-8 and
-is rejected as a pathname. On macOS, `-r -l` remains useful for
-inspection: non-ASCII bytes are printed as ASCII escapes such as `\xC4`, not
-written raw to the terminal. Raw-name extraction is unavailable there.
+Names are converted from MacRoman to UTF-8 by default. On byte-oriented
+filesystems, `-r` instead preserves the original filename bytes. Raw-name
+listing escapes non-ASCII bytes; raw-name extraction is unavailable on macOS,
+whose filesystem APIs require valid UTF-8 paths.
 
 ## Preparing inputs
 
@@ -118,13 +103,6 @@ Accepted installer inputs:
 | `Installer` | `._Installer` | AppleDouble |
 | `Installer.data` | raw `Installer.rsrc` | `macunpack -f` |
 
-AppleDouble is a metadata container. Its resource-fork entry contains the raw
-fork plus a header and entry table; `._name` is the standard loose-file naming
-convention. A raw `.rsrc` from `macunpack -f` contains only the fork bytes, so
-its filesystem modification time is preserved but Finder information and the
-classic creation time have nowhere portable to go. AppleDouble carries Finder
-information, but modern macOS rejects its historical date entry, so creation
-time is preserved only by native output.
 For a raw pair, `unvise` accepts `Installer`, `Installer.data`, or
 `Installer.rsrc` and resolves both files automatically.
 
@@ -135,9 +113,8 @@ unar -k hidden package.bin        # also accepts .sit
 ./unvise -x output Installer
 ```
 
-The four HQX files in the corpus contain StuffIt archives. Extract these in
-two stages; `unar` 1.10.7 on macOS loses the final hidden sidecar when it
-recurses through both layers in one invocation:
+BinHex downloads commonly contain a StuffIt archive. Extract each layer while
+retaining hidden AppleDouble files:
 
 ```sh
 unar -nr -k hidden package.hqx    # produces the enclosed .sit file
@@ -153,18 +130,18 @@ macunpack -f Installer.bin        # produces Installer.data and Installer.rsrc
 ./unvise -x output Installer
 ```
 
-`hexbin` can also remove a BinHex layer. When its output is a StuffIt archive,
-another tool is still required. `macunpack` can read early StuffIt methods,
-but the StuffIt samples in this corpus require `unar`.
+`hexbin` can also remove a BinHex layer. If its output is a StuffIt archive,
+extract that separately before running `unvise`.
 
 ## Limitations
 
-Password-protected archives are unsupported. The corpus contains one VISE 6
-Active Install stub in two wrappers; `unvise` recognizes it, but does not
-locate or decode its external payload archive. Native MSVC builds are
-unsupported. Installer actions and directory permissions are not applied.
+Password-protected archives are unsupported. Active Install web stubs are
+recognized, but their external payload archives are not downloaded or decoded.
+Installer actions and directory permissions are not applied. Native MSVC
+builds are unsupported.
 
-See [FORMAT.md](FORMAT.md) for the reverse-engineered format details.
+See [FORMAT.md](FORMAT.md) for format details and
+[test-data/README.md](test-data/README.md) for the compatibility corpus.
 
 ## License
 
