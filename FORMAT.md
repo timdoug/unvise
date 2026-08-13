@@ -308,6 +308,8 @@ at their declared offsets and excludes the prefix.
 - `DATA` resource 0 is normally an `A89F000C` packed-code stream.
 - The verified 4.5 and 4.6.1 self-installers instead store the permutation
   literally; this does not make their catalogs Lite records.
+- A VISE 8.0.2 68K installer stores the three initialization streams directly
+  in `DATA 0`, without either the packed-code wrapper or a literal table.
 - VISE 4.5 uses `CODE` 18 as its word dictionary and places the permutation
   directly in the expanded resource.
 - `CODE` 24 normally supplies its word dictionary.
@@ -515,6 +517,8 @@ Processing order:
 | 6.5 | Visual Projector 2.0; InstallerVISE 6.5 Demo; iControl 1.2 |
 | 7.0 | Interarchy 4.0; Interarchy 3.8 |
 | 7.0.1 | Tcl/Tk 8.3.2p1 Runtime and Web installers |
+| 7.2 | Tcl/Tk 8.3.3 Runtime installer |
 | 7.3 | HP LaserJet 4/5/6 legacy driver |
-| 8.0.2 | MacPython 2.2.3; MacPython 2.3.3 |
+| 7.4 | Tcl/Tk 8.3.4 Full installer |
+| 8.0.2 | MacPython 2.2.3; MacPython 2.3.3; Tcl/Tk 8.3.5 Runtime/Full and 8.4.1 Web installers |
 | 8.5 | Installer VISE 8.5 |

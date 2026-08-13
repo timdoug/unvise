@@ -487,7 +487,7 @@ static void load_table(Extraction *x, Buffer data0, bool direct_table, bool has_
             die("could not find a unique VISE substitution table in the PEF application");
     } else if (direct_table) {
         if (find_permutation(data0, x->table) != 1)
-            die("could not identify a unique VISE substitution table");
+            data0_table(data0, x->table);
     } else if (find_permutation(data0, x->table) != 1)
         data0_table(data0, x->table);
 }

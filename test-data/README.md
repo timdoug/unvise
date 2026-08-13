@@ -36,11 +36,16 @@ The archives are ignored by Git because they are third-party software.
 | `interarchy38.sit` | 7.0 | extracts after `unar` |
 | `TclTk_8.3.2p1_RuntimeInstall.bin` | 7.0.1 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.2_WebInstall.bin` | 7.0.1 Active Install | reports missing external payload |
+| `TclTk_8.3.3_RuntimeInstall.bin` | 7.2 | MacBinary; extracts after `unar` |
+| `TclTk_8.3.4_FullInstall.bin` | 7.4 | MacBinary; extracts after removing MacBinary |
 | `ljlegacy-en.sit` | 7.3 | extracts after `unar` |
 | `MacPython223full.bin` | 8.0.2 | extracts after removing MacBinary |
 | `MacPython223full.hqx` | 8.0.2 | matches `MacPython223full.bin` after decoding |
 | `MacPython233full.bin` | 8.0.2 | extracts after removing MacBinary |
 | `MacPython233full.hqx` | 8.0.2 | matches `MacPython233full.bin` after decoding |
+| `MacTclTk_8.3.5_RuntimeInstl.bin` | 8.0.2 | MacBinary; extracts after `unar` |
+| `MacTclTk_8.3.5_FullInstall.bin` | 8.0.2 | MacBinary; extracts after `unar` |
+| `MacTclTk_8.4.1_WebInstall.bin` | 8.0.2 Active Install | reports missing external payload |
 | `IVISE8.5_NormalInstall.bin` | 8.5 | extracts after removing MacBinary |
 | `InstallerVISE85.sit_.bin` | 8.5 | contains the preceding installer |
 
@@ -49,11 +54,13 @@ The archives are ignored by Git because they are third-party software.
 `ljlegacy-en.sit` is HP's public legacy LaserJet installer from
 `https://ftp.hp.com/pub/softlib/software4/lj606/lj-29264-1/ljlegacy-en.sit`.
 
-All 38 fixtures unwrap with the current `unar`. Nested HQX/StuffIt fixtures
-require two explicit `unar` stages on macOS. Full extraction succeeds for 35.
-The two VISE 6 Active Install files contain the same stub; the independent
-Tcl/Tk VISE 7.0.1 web installer is another stub. All three correctly report
-that their external payload is missing.
+Of the 43 fixtures, 42 unwrap completely with the current `unar`; its MacBinary
+reader fails on the 18 MB Tcl/Tk 8.3.4 file, which extracts correctly when its
+forks are split directly. Nested HQX/StuffIt fixtures require two explicit
+`unar` stages on macOS. Full VISE extraction succeeds for 39. The two VISE 6
+Active Install files contain the same stub; the independent Tcl/Tk 7.0.1 and
+8.0.2 web installers add two more. All four correctly report that their
+external payload is missing.
 
 The Tcl/Tk files are the original SourceForge releases:
 `https://sourceforge.net/projects/tcl/files/Tcl/8.3.2/`.
