@@ -63,17 +63,6 @@ static char *convert_name(const uint8_t *p, size_t n, bool raw) {
     return s;
 }
 
-static bool valid_name(Buffer data, size_t start, size_t end) {
-    if (start >= end)
-        return false;
-
-    for (size_t i = start; i < end; i++)
-        if ((data.p[i] < 0x20 && data.p[i] != '\r') || data.p[i] == 0x7f)
-            return false;
-
-    return true;
-}
-
 static char *record_name(Buffer data, Record *r, bool raw_names) {
     if (r->fixed_size) {
         size_t length_offset;
@@ -97,87 +86,53 @@ static char *record_name(Buffer data, Record *r, bool raw_names) {
     return NULL;
 }
 
-void print_quoted(const char *s, bool raw) {
-    putchar('"');
+void print_quoted(FILE *f, const char *s, bool raw) {
+    fputc('"', f);
 
     for (; *s; s++) {
         unsigned char c = (unsigned char)*s;
 
         if (c < 0x20 || c == 0x7f || (raw && c >= 0x80))
-            printf("\\x%02X", c);
+            fprintf(f, "\\x%02X", c);
         else if (c == '"' || c == '\\')
-            printf("\\%c", c);
+            fprintf(f, "\\%c", c);
         else
-            putchar(c);
+            fputc(c, f);
     }
 
-    putchar('"');
+    fputc('"', f);
 }
 
-static bool is_tag(const uint8_t *p) {
-    return !memcmp(p, "CVCT", 4) || !memcmp(p, "DVCT", 4) || !memcmp(p, "FVCT", 4) ||
-           !memcmp(p, "PACK", 4);
-}
-
-CatalogLayout catalog_direct_layout(Buffer data, size_t offset) {
+CatalogLayout catalog_uncompressed_layout(uint8_t revision) {
     /*
-     * A literal substitution table is used by both Lite and some full VISE
-     * self-installers. Full compact records expose a complete trailing name at
-     * one of their two observed boundaries; Lite records instead use a Pascal
-     * name and trailer.
+     * The 68K loaders dispatch on the low byte of the SVCT format field.
+     * Revision 0 is Lite, revisions 2--4 use compact bodies, and later
+     * pre-Carbon revisions use the normal bodies. Revision 1 has not been
+     * recovered or observed, so do not silently assign it a layout.
      */
-    for (size_t position = offset; position + 4 <= data.n;) {
-        while (position + 4 <= data.n && !is_tag(data.p + position))
-            position++;
-        if (position + 4 > data.n)
-            break;
-
-        size_t end = position + 4;
-        while (end + 4 <= data.n && !is_tag(data.p + end))
-            end++;
-
-        if (!memcmp(data.p + position, "DVCT", 4) &&
-            (valid_name(data, position + 0x58, end) ||
-             valid_name(data, position + 0x68, end)))
-            return CATALOG_COMPACT;
-        if (!memcmp(data.p + position, "FVCT", 4) &&
-            (valid_name(data, position + 0x7c, end) ||
-             valid_name(data, position + 0x8c, end)))
-            return CATALOG_COMPACT;
-
-        position = end;
-    }
-
-    return CATALOG_LITE;
+    if (revision == 0)
+        return CATALOG_LITE;
+    if (revision >= 2 && revision <= 4)
+        return CATALOG_COMPACT;
+    if (revision >= 5 && revision < 12)
+        return CATALOG_NORMAL;
+    die("unsupported uncompressed catalog revision");
+    return CATALOG_NORMAL;
 }
 
-CatalogLayout catalog_pef_layout(Buffer data) {
+CatalogLayout catalog_compressed_layout(uint8_t revision) {
     /*
-     * Carbon-era VISE 7 and VISE 8 both keep the substitution table in the
-     * PEF application rather than DATA 0. At the ordinary compressed-catalog
-     * name offset VISE 8 has binary metadata, while VISE 7 has a complete
-     * printable MacRoman name.
+     * The Carbon loaders are separate implementations, but retain the common
+     * SVCT revision sequence. The VISE 7.3 PPC loader (revision 11) reads the
+     * ordinary 0x94/0xba fixed bodies. VISE 8 starts at revision 12 and reads
+     * its later structures; VISE 8.5 uses revision 14.
      */
-    for (size_t offset = 0; offset + 4 <= data.n;) {
-        while (offset + 4 <= data.n && !is_tag(data.p + offset))
-            offset++;
-        if (offset + 4 > data.n)
-            break;
-
-        size_t end = offset + 4;
-        while (end + 4 <= data.n && !is_tag(data.p + end))
-            end++;
-        if (!memcmp(data.p + offset, "DVCT", 4) &&
-            valid_name(data, offset + 0x98, end))
-            return CATALOG_COMPRESSED;
-        if (!memcmp(data.p + offset, "FVCT", 4) &&
-            valid_name(data, offset + 0xbe, end))
-            return CATALOG_COMPRESSED;
-
-        offset = end;
-    }
-
-    return CATALOG_VISE8;
+    if (revision >= 12)
+        return CATALOG_VISE8;
+    if (revision >= 5)
+        return CATALOG_COMPRESSED;
+    die("unsupported compressed catalog revision");
+    return CATALOG_COMPRESSED;
 }
 
 static bool vise8_next_tag(Buffer data, size_t offset, bool last) {
@@ -199,28 +154,27 @@ static size_t vise8_file_size(Buffer data, size_t offset) {
     size_t secondary = data.p[offset + 0xb9];
     unsigned type = data.p[offset + 0x75];
     size_t size = fixed + primary;
-    uint32_t record_type = be32(data, offset + 4);
-    bool parameter = (be32(data, offset + 0x44) == UINT32_C(0x00010001) ||
-                      be32(data, offset + 0x44) == UINT32_C(0x00020001) ||
-                      be32(data, offset + 0x44) == UINT32_C(0x00040001)) &&
-                     be32(data, offset + 0x4c) == UINT32_C(0x00010001);
-    bool file = !parameter &&
-                (record_type == 0 || record_type >= UINT32_C(0x00010000)) &&
-                (record_type >> 24) != 3;
 
-    if (file) {
-        size += secondary;
-        if (!span(data, offset, size))
-            die("truncated VISE 8 FVCT variable fields");
-        return size;
-    }
+    /*
+     * BitTst(record + 0x0c, 4) guards the action-parameter tail in both
+     * recovered VISE 8.5 PPC loaders.  Classic BitTst numbers bits from the
+     * high bit of the first byte, hence mask 0x08 here.  The loader consumes
+     * the common variable field before its subtype jump table and consumes
+     * the secondary name after it.
+     */
+    bool action_tail = (data.p[offset + 0x0c] & 0x08) != 0;
 
-    switch (type) {
+    if (action_tail)
+        size += variable;
+
+    switch (action_tail ? type : UINT_MAX) {
     case 3:
+    case 4:
     case 5:
+    case 7:
     case 9:
     case 10: {
-        size_t length_offset = size + variable;
+        size_t length_offset = size;
 
         if (!span(data, offset + length_offset, 1))
             die("truncated VISE 8 action string");
@@ -228,41 +182,47 @@ static size_t vise8_file_size(Buffer data, size_t offset) {
         break;
     }
     case 6:
-        size += variable + be16(data, offset + 0x2e) + be16(data, offset + 0x32) +
+        size += be16(data, offset + 0x2e) + be16(data, offset + 0x32) +
                 be16(data, offset + 0x38);
         break;
-    case 13:
-        size += variable + secondary;
-        break;
     default:
-        size += secondary;
         break;
     }
+
+    size += secondary;
 
     if (!span(data, offset, size))
         die("truncated VISE 8 FVCT variable fields");
     return size;
 }
 
-static size_t vise8_directory_size(Buffer data, size_t offset, bool last, uint16_t *fixed) {
-    if (!span(data, offset, 0xa4))
+static uint16_t vise8_directory_fixed(uint8_t revision) {
+    /*
+     * Both recovered VISE 8.0.2 PPC loaders read 0xa0 bytes; both recovered
+     * VISE 8.5 loaders read 0xa4. No revision-13 installer is available, so
+     * refusing it is preferable to selecting a body size from coincidental
+     * bytes following the record.
+     */
+    if (revision == 12)
+        return 0xa0;
+    if (revision == 14)
+        return 0xa4;
+    die("unsupported VISE 8 catalog revision");
+    return 0;
+}
+
+static size_t vise8_directory_size(Buffer data, size_t offset, uint16_t fixed) {
+    if (!span(data, offset, fixed))
         die("truncated VISE 8 DVCT record");
 
     size_t names = (size_t)data.p[offset + 0x4f] + data.p[offset + 0x50];
-    size_t old_size = 0xa0 + names;
-    size_t new_size = 0xa4 + names;
-    bool old_valid = vise8_next_tag(data, offset + old_size, last);
-    bool new_valid = vise8_next_tag(data, offset + new_size, last);
-
-    if (old_valid == new_valid)
-        die("ambiguous or invalid VISE 8 DVCT length");
-    *fixed = old_valid ? 0xa0 : 0xa4;
-    return old_valid ? old_size : new_size;
+    return fixed + names;
 }
 
-static Record *parse_vise8_catalog(Buffer data, size_t expected, size_t *count) {
+static Record *parse_vise8_catalog(Buffer data, size_t expected, uint8_t revision, size_t *count) {
     Record *records = calloc(expected + 1, sizeof(*records));
     size_t offset = 0;
+    uint16_t directory_fixed = vise8_directory_fixed(revision);
 
     if (!records)
         die("out of memory");
@@ -279,9 +239,10 @@ static Record *parse_vise8_catalog(Buffer data, size_t expected, size_t *count) 
         if (!strcmp(record->tag, "FVCT")) {
             record->fixed_size = 0xc6;
             offset += vise8_file_size(data, offset);
-        } else if (!strcmp(record->tag, "DVCT"))
-            offset += vise8_directory_size(data, offset, last, &record->fixed_size);
-        else
+        } else if (!strcmp(record->tag, "DVCT")) {
+            record->fixed_size = directory_fixed;
+            offset += vise8_directory_size(data, offset, directory_fixed);
+        } else
             die("invalid VISE 8 catalog record signature");
 
         if (!vise8_next_tag(data, offset, last))
@@ -303,16 +264,10 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
     size_t secondary = fixed > 0xb9 ? data.p[offset + 0xb9] : 0;
     unsigned type = fixed > 0x75 ? data.p[offset + 0x75] : 0;
     size_t size = fixed + primary;
-    uint32_t record_type = be32(data, offset + 4);
-    bool parameter = (be32(data, offset + 0x44) == UINT32_C(0x00010001) ||
-                      be32(data, offset + 0x44) == UINT32_C(0x00020001) ||
-                      be32(data, offset + 0x44) == UINT32_C(0x00040001)) &&
-                     be32(data, offset + 0x4c) == UINT32_C(0x00010001);
-    bool file = !parameter &&
-                (record_type == 0 || record_type >= UINT32_C(0x00010000)) &&
-                (record_type >> 24) != 3;
+    /* Classic BitTst(..., 4) addresses mask 0x08 in the first stored byte. */
+    bool action = (be32(data, offset + 0x0c) & UINT32_C(0x08000000)) != 0;
 
-    if (file) {
+    if (!action) {
         size += secondary;
         if (!span(data, offset, size))
             die("truncated FVCT variable fields");
@@ -326,7 +281,7 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
         size += variable;
         break;
     case 2:
-        if (fixed >= 0xba && (record_type >> 24) != 3)
+        if (fixed >= 0xba)
             size += variable;
         break;
     case 3:
@@ -362,57 +317,42 @@ static bool semantic_tag(Buffer data, size_t offset) {
            (!memcmp(data.p + offset, "DVCT", 4) || !memcmp(data.p + offset, "FVCT", 4));
 }
 
-static size_t compact_record_size(Buffer data, size_t offset, bool directory, uint16_t *fixed) {
-    size_t short_fixed = directory ? 0x58 : 0x7c;
-    size_t long_fixed = short_fixed + 0x10;
+static size_t compact_record_size(Buffer data, size_t offset, bool directory, uint8_t revision,
+                                  uint16_t *fixed) {
+    size_t base_fixed = directory ? 0x58 : 0x7c;
+    size_t body_extension = revision >= 4 ? 0x10 : 0;
+    size_t record_fixed = base_fixed + body_extension;
     size_t length_offset = directory ? 0x50 : 0x7a;
 
     if (!span(data, offset + length_offset, 1))
         die("truncated compact catalog record");
     size_t names = data.p[offset + length_offset];
-    size_t short_size;
-    size_t long_size;
+    size_t size;
 
     if (directory) {
-        short_size = short_fixed + names;
-        long_size = long_fixed + names;
+        size = record_fixed + names;
     } else {
-        uint32_t record_type = be32(data, offset + 4);
-        bool parameter = (be32(data, offset + 0x44) == UINT32_C(0x00010001) ||
-                          be32(data, offset + 0x44) == UINT32_C(0x00020001) ||
-                          be32(data, offset + 0x44) == UINT32_C(0x00040001)) &&
-                         be32(data, offset + 0x4c) == UINT32_C(0x00010001);
-        bool file = !parameter &&
-                    (record_type == 0 || record_type >= UINT32_C(0x00010000)) &&
-                    (record_type >> 24) != 3;
+        bool action =
+            (be32(data, offset + 0x0c) & UINT32_C(0x08000000)) != 0;
 
-        if (!file && (data.p[offset + 0x75] == 4 || data.p[offset + 0x75] == 6)) {
+        if (action && (data.p[offset + 0x75] == 4 || data.p[offset + 0x75] == 6)) {
             size_t extra = be16(data, offset + 0x38);
 
             if (data.p[offset + 0x75] == 6)
                 extra += be16(data, offset + 0x2e) + be16(data, offset + 0x32);
-            short_size = short_fixed + names + extra;
-            long_size = long_fixed + names + extra;
+            size = record_fixed + names + extra;
         } else {
-            short_size = variable_file_size(data, offset, short_fixed);
-            long_size = variable_file_size(data, offset, long_fixed);
+            size = variable_file_size(data, offset, record_fixed);
         }
     }
-    bool short_valid = semantic_tag(data, offset + short_size) ||
-                       (span(data, offset + short_size, 4) &&
-                        !memcmp(data.p + offset + short_size, "PACK", 4));
-    bool long_valid = semantic_tag(data, offset + long_size) ||
-                      (span(data, offset + long_size, 4) &&
-                       !memcmp(data.p + offset + long_size, "PACK", 4));
-
-    if (short_valid == long_valid)
-        die("ambiguous or invalid compact catalog record length");
-    *fixed = short_valid ? (uint16_t)short_fixed : (uint16_t)long_fixed;
-    return short_valid ? short_size : long_size;
+    if (!span(data, offset, size))
+        die("truncated compact catalog record");
+    *fixed = (uint16_t)record_fixed;
+    return size;
 }
 
 static Record *parse_catalog_records(Buffer data, size_t offset, size_t expected,
-                                     CatalogLayout layout, size_t *count) {
+                                     CatalogLayout layout, uint8_t revision, size_t *count) {
     size_t capacity = expected + 3;
     Record *records = calloc(capacity, sizeof(*records));
     size_t n = 0, position = offset;
@@ -447,7 +387,8 @@ static Record *parse_catalog_records(Buffer data, size_t offset, size_t expected
         record->tag[4] = 0;
 
         if (layout == CATALOG_COMPACT)
-            position += compact_record_size(data, position, directory, &record->fixed_size);
+            position +=
+                compact_record_size(data, position, directory, revision, &record->fixed_size);
         else if (directory) {
             size_t fixed = layout == CATALOG_LITE ? 0x58 :
                            layout == CATALOG_NORMAL ? 0x94 : 0x98;
@@ -481,40 +422,39 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
         return;
 
     record->packed[0] = be32(data, record->off + 0x44);
+    record->record_flags = be32(data, record->off + 0x0c);
     record->expanded[0] = be32(data, record->off + 0x48);
     record->packed[1] = be32(data, record->off + 0x4c);
     record->expanded[1] = be32(data, record->off + 0x50);
+    record->checksum = be32(data, record->off + 0x54);
     record->payload = be32(data, record->off + 0x64);
-
     /*
-     * Search/delete actions reuse fork fields for parameters. This sentinel
-     * distinguishes them from lengths in both compact and later layouts.
+     * The VISE 4.5 68K and VISE 8.5 PPC loaders independently copy raw
+     * +0x3c/+0x40 to internal +0x42/+0x46.  Their file-info paths use those
+     * internal fields as classic creation and modification dates.
      */
-    bool parameter_record = (record->packed[0] == UINT32_C(0x00010001) ||
-                             record->packed[0] == UINT32_C(0x00020001) ||
-                             record->packed[0] == UINT32_C(0x00040001)) &&
-                            record->packed[1] == UINT32_C(0x00010001);
+    record->created = be32(data, record->off + 0x3c);
+    record->modified = be32(data, record->off + 0x40);
+    memcpy(record->finder_info, data.p + record->off + 0x2c,
+           sizeof(record->finder_info));
 
     if (layout == CATALOG_LITE) {
-        record->file = !parameter_record &&
-                       (record->packed[0] || record->packed[1] || record->expanded[0] ||
-                        record->expanded[1]);
+        record->file = (record->record_flags & UINT32_C(0x08000000)) == 0;
         record->parent = be32(data, record->off + 0x58);
         return;
     }
 
-    uint32_t type = be32(data, record->off + 4);
-
-    record->file = !parameter_record && (type == 0 || type >= UINT32_C(0x00010000)) &&
-                   (type >> 24) != 3;
+    /* The original loaders use bit 4 of the first flag byte for actions. */
+    record->file = (record->record_flags & UINT32_C(0x08000000)) == 0;
     record->parent = be32(data, record->off + (layout == CATALOG_COMPACT ? 0x60 : 0x58));
-    if (layout == CATALOG_VISE8)
+    if (record->file && record->end - record->off >= 0x70) {
+        record->has_fork_offsets = true;
+        record->fork_offset[0] = be32(data, record->off + 0x68);
+        record->fork_offset[1] = be32(data, record->off + 0x6c);
+    }
+    if (layout == CATALOG_VISE8) {
         record->depth = be16(data, record->off + 0x60);
-
-    if (record->end - record->off >= 0x70 &&
-        !memcmp(data.p + record->off + 0x2c, "issp", 4) && be32(data, record->off + 0x68) &&
-        be32(data, record->off + 0x6c))
-        record->gap = be32(data, record->off + 0x68);
+    }
 }
 
 static void decode_records(Buffer data, Record *records, size_t count, CatalogLayout layout,
@@ -576,7 +516,7 @@ static bool directory_has_parent(const Record *records, size_t count, uint32_t p
     return false;
 }
 
-static void repair_lite_parents(Record *records, size_t count) {
+static void recover_lite_paths(Record *records, size_t count) {
     uint32_t current_dir = 0;
 
     for (size_t i = 0; i < count; i++) {
@@ -591,8 +531,11 @@ static void repair_lite_parents(Record *records, size_t count) {
             continue;
 
         /*
-         * Lite 3.6 may store an install-location token instead of a DVCT ID.
-         * Catalog order retains the containing directory association.
+         * The Lite engine treats +0x58 as a destination reference. Most are
+         * DVCT IDs, but some are opaque installer-object IDs with no DVCT in
+         * the archive. For those, preorder is the only catalog representation
+         * of the display hierarchy. A value used as a DVCT parent denotes the
+         * virtual root rather than the most recently listed directory.
          */
         if (directory_has_parent(records, count, record->parent))
             current_dir = 0;
@@ -724,21 +667,20 @@ static void plan_output_paths(Record *all, size_t count) {
 }
 
 Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,
-                size_t *count) {
-    Record *records = layout == CATALOG_VISE8 ? parse_vise8_catalog(data, expected, count) :
+                uint8_t revision, size_t *count) {
+    Record *records = layout == CATALOG_VISE8 ? parse_vise8_catalog(data, expected, revision, count) :
                                                parse_catalog_records(data, offset, expected, layout,
-                                                                     count);
+                                                                     revision, count);
 
     decode_records(data, records, *count, layout, raw_names);
     if (layout == CATALOG_LITE)
-        repair_lite_parents(records, *count);
+        recover_lite_paths(records, *count);
     plan_output_paths(records, *count);
 
     return records;
 }
 
-char *output_path(const Options *o, Record *all, size_t index, const char *fork,
-                  const char *variant) {
+char *output_path(const Options *o, Record *all, size_t index, const char *fork) {
     const char *relative = all[index].path;
     size_t cap = strlen(o->out) + strlen(relative) + 128;
     char *path = malloc(cap);
@@ -749,10 +691,6 @@ char *output_path(const Options *o, Record *all, size_t index, const char *fork,
     strcpy(path, o->out);
     strcat(path, "/");
     strcat(path, relative);
-    if (variant) {
-        strcat(path, "-");
-        strcat(path, variant);
-    }
     if (!o->native && !o->appledouble) {
         strcat(path, ".");
         strcat(path, fork);

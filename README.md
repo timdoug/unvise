@@ -5,14 +5,18 @@ other Linux/BSD/POSIX systems. It reads and writes native macOS forks where supp
 sidecars, and raw `.data`/`.rsrc` fork pairs. I've tested it against 36
 freeware, shareware, and demo installer archives; should be relatively comprehensive, but no promises, patches encouraged!
 
+Expanded files are verified against the CRC-32 stored in their catalog
+records. Native and AppleDouble output also preserve classic Finder
+information and file creation/modification times.
+
 | InstallerVISE | Supported format features |
 | --- | --- |
 | Lite 3.6 | short catalogs, direct substitution tables |
-| 4.2, 4.5, 4.6.1 | compact and extended-compact records, literal or packed initialization, short actions |
+| 4.2, 4.5, 4.6.1 | revision-sized compact records, literal or packed initialization, short actions |
 | 5.0.1, 5.5, 5.5.1, 5.5.2 | packed initialization code, shared payloads, file and action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
 | 6.5 | compressed catalogs |
-| 7.0 | alternate initialization resources, version-source payloads |
+| 7.0 | alternate initialization resources, offset-fork payloads |
 | 7.3 | PEF-embedded substitution table with ordinary compressed catalog records |
 | 8.0.2, 8.5 | later compressed catalogs, PEF tables, framed payloads, mixed stored/compressed blocks |
 
@@ -24,8 +28,7 @@ same pathname, byte-identical records are omitted. The lowest-numbered distinct
 record keeps the original name and later distinct alternatives receive a
 stable `~NNNN` catalog-record suffix. This preserves every meaningful
 alternative without inventing installation policy or silently overwriting
-data. A `-version` suffix distinguishes the additional form carried by a
-version-source record when it differs from the same record's shared payload.
+data.
 
 ## Usage
 
@@ -144,18 +147,16 @@ macunpack -f Installer.bin        # produces Installer.data and Installer.rsrc
 ./unvise -x output Installer
 ```
 
-`hexbin` can also remove a BinHex layer, but none of the four HQX files in the
-test corpus contains an InstallerVISE application directly. Each decodes to a
-MacBinary-wrapped StuffIt archive whose compression is too new for
-`macunpack`; use `unar` for those files. `macunpack` can also read early
-StuffIt archives, but the 16 StuffIt files in the corpus require `unar`.
+`hexbin` can also remove a BinHex layer. When its output is a StuffIt archive,
+another tool is still required. `macunpack` can read early StuffIt methods,
+but the StuffIt samples in this corpus require `unar`.
 
 ## Limitations
 
 Password-protected archives are unsupported. The corpus contains one VISE 6
 Active Install stub in two wrappers; `unvise` recognizes it, but does not
 locate or decode its external payload archive. Native MSVC builds are
-unsupported.
+unsupported. Installer actions and directory attributes are not applied.
 
 See [FORMAT.md](FORMAT.md) for the reverse-engineered format details.
 

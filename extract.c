@@ -22,6 +22,11 @@ static bool record_has_payload(const Record *record) {
            (record->packed[0] || record->packed[1]);
 }
 
+static bool record_is_empty_file(const Record *record) {
+    return !strcmp(record->tag, "FVCT") && record->file && !record->expanded[0] &&
+           !record->expanded[1] && !record->packed[0] && !record->packed[1];
+}
+
 static bool same_payload(const Record *record, uint32_t payload) {
     return record_has_payload(record) && record->payload == payload;
 }
@@ -38,7 +43,7 @@ static void print_record(const Record *record, size_t index, bool raw_names) {
 
     if (record->name) {
         fputs(" name=", stdout);
-        print_quoted(record->name, raw_names);
+        print_quoted(stdout, record->name, raw_names);
     }
 
     putchar('\n');
@@ -51,18 +56,40 @@ static void check_payload(const Extraction *x, size_t offset, size_t packed_size
         die("payload overlaps catalog");
 }
 
-static void write_fork_variant(const Extraction *x, size_t index, int fork, const uint8_t *data,
-                               size_t size, const char *variant) {
-    const char *kind = fork ? "rsrc" : "data";
-    char *path = output_path(x->options, x->records, index, kind, variant);
+static uint32_t fork_crc(uint32_t crc, const uint8_t *data, size_t size) {
+    while (size) {
+        uInt chunk = size > UINT_MAX ? UINT_MAX : (uInt)size;
 
-    write_output(x->options, path, kind, data, size);
-    free(path);
+        crc = (uint32_t)crc32(crc, data, chunk);
+        data += chunk;
+        size -= chunk;
+    }
+    return crc;
+}
+
+static void check_fork_crc(const Record *record, const uint8_t *data, const uint8_t *resource) {
+    uint32_t crc = (uint32_t)crc32(0L, Z_NULL, 0);
+
+    if (record->expanded[0])
+        crc = fork_crc(crc, data, record->expanded[0]);
+    if (record->expanded[1])
+        crc = fork_crc(crc, resource, record->expanded[1]);
+    if (crc != record->checksum) {
+        fputs("unvise: checksum mismatch for ", stderr);
+        print_quoted(stderr, record->name ? record->name : "unnamed", false);
+        fprintf(stderr, ": expected 0x%08X, got 0x%08X\n", record->checksum, crc);
+        exit(1);
+    }
 }
 
 static void write_fork(const Extraction *x, size_t index, int fork, const uint8_t *data,
                        size_t size) {
-    write_fork_variant(x, index, fork, data, size, NULL);
+    const char *kind = fork ? "rsrc" : "data";
+    char *path = output_path(x->options, x->records, index, kind);
+
+    write_output(x->options, path, kind, data, size, x->records[index].finder_info,
+                 x->records[index].created, x->records[index].modified);
+    free(path);
 }
 
 static bool same_deferred_record(const Extraction *x, size_t a, size_t b) {
@@ -129,24 +156,28 @@ static void emit_fork(const Extraction *x, size_t index, int fork, const uint8_t
         finish_deferred_record(x, index);
 }
 
-static void extract_version_source(const Extraction *x, size_t index) {
+static void extract_offset_forks(const Extraction *x, size_t index) {
     const Record *record = &x->records[index];
     size_t total = record->packed[1];
-    size_t resource_start = (size_t)record->expanded[0] + record->gap;
 
-    if (resource_start > total || record->expanded[1] > total - resource_start)
-        die("version-source payload layout overflow");
+    for (int fork = 0; fork < 2; fork++)
+        if (record->fork_offset[fork] > total ||
+            record->expanded[fork] > total - record->fork_offset[fork])
+            die("offset-fork payload layout overflow");
 
     check_payload(x, record->payload, record->packed[0]);
 
     Buffer expanded =
         inflate_member(slice(x->data, record->payload, record->packed[0]), x->table, total);
+    const uint8_t *data = expanded.p + record->fork_offset[0];
+    const uint8_t *resource = expanded.p + record->fork_offset[1];
+
+    check_fork_crc(record, data, resource);
 
     if (record->expanded[0])
-        write_fork_variant(x, index, 0, expanded.p, record->expanded[0], "version");
+        emit_fork(x, index, 0, data, record->expanded[0]);
     if (record->expanded[1])
-        write_fork_variant(x, index, 1, expanded.p + resource_start, record->expanded[1],
-                           "version");
+        emit_fork(x, index, 1, resource, record->expanded[1]);
 
     free(expanded.p);
 }
@@ -198,21 +229,36 @@ static size_t shared_packed_size(const Extraction *x, const Record *record,
 
 static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expanded) {
     size_t position = 0;
+    size_t covered_end = 0;
 
     for (size_t i = 0; i < x->count; i++)
-        if (same_payload(&x->records[i], payload))
+        if (same_payload(&x->records[i], payload)) {
+            const Record *record = &x->records[i];
+            const uint8_t *forks[2] = {NULL, NULL};
+
             for (int fork = 0; fork < 2; fork++)
-                if (x->records[i].expanded[fork]) {
-                    size_t size = x->records[i].expanded[fork];
+                if (record->expanded[fork]) {
+                    size_t size = record->expanded[fork];
+
+                    if (record->has_fork_offsets)
+                        position = record->fork_offset[fork];
 
                     if (position > expanded.n || size > expanded.n - position)
                         die("shared payload layout overflow");
 
-                    emit_fork(x, i, fork, expanded.p + position, size);
+                    forks[fork] = expanded.p + position;
                     position += size;
+                    if (position > covered_end)
+                        covered_end = position;
                 }
 
-    if (position != expanded.n && !catalog_has_vise8_payloads(x->layout))
+            check_fork_crc(record, forks[0], forks[1]);
+            for (int fork = 0; fork < 2; fork++)
+                if (forks[fork])
+                    emit_fork(x, i, fork, forks[fork], record->expanded[fork]);
+        }
+
+    if (covered_end != expanded.n && !catalog_has_vise8_payloads(x->layout))
         die("unassigned bytes in shared payload");
 }
 
@@ -235,27 +281,34 @@ static void extract_vise8_framed(const Extraction *x, size_t index) {
     Buffer expanded = inflate_member(slice(x->data, record->payload, record->packed[0]), x->table,
                                      record->packed[1]);
 
-    if (record->expanded[0] > expanded.n)
+    if (record->fork_offset[0] > expanded.n ||
+        record->expanded[0] > expanded.n - record->fork_offset[0])
         die("VISE 8 framed payload is shorter than its data fork");
 
-    emit_fork(x, index, 0, expanded.p, record->expanded[0]);
+    check_fork_crc(record, expanded.p + record->fork_offset[0], NULL);
+    emit_fork(x, index, 0, expanded.p + record->fork_offset[0], record->expanded[0]);
     free(expanded.p);
 }
 
 static void extract_separate_forks(const Extraction *x, size_t index) {
     const Record *record = &x->records[index];
     size_t position = record->payload;
+    Buffer expanded[2] = {{0}, {0}};
 
     for (int fork = 0; fork < 2; fork++)
         if (record->packed[fork]) {
             check_payload(x, position, record->packed[fork]);
 
-            Buffer expanded = inflate_member(slice(x->data, position, record->packed[fork]),
-                                             x->table, record->expanded[fork]);
-
-            emit_fork(x, index, fork, expanded.p, expanded.n);
-            free(expanded.p);
+            expanded[fork] = inflate_member(slice(x->data, position, record->packed[fork]),
+                                            x->table, record->expanded[fork]);
             position += record->packed[fork];
+        }
+
+    check_fork_crc(record, expanded[0].p, expanded[1].p);
+    for (int fork = 0; fork < 2; fork++)
+        if (expanded[fork].p) {
+            emit_fork(x, index, fork, expanded[fork].p, expanded[fork].n);
+            free(expanded[fork].p);
         }
 }
 
@@ -270,19 +323,37 @@ static void extract_records(const Extraction *x) {
 
         if (x->options->list)
             print_record(record, i, x->options->raw_names);
-        if (!x->options->out || !record_has_payload(record))
+        if (!x->options->out)
             continue;
-        if (record->gap) {
-            extract_version_source(x, i);
+        if (record_is_empty_file(record)) {
+            check_fork_crc(record, NULL, NULL);
+            emit_fork(x, i, 0, (const uint8_t *)"", 0);
             continue;
         }
-
+        if (!record_has_payload(record))
+            continue;
         size_t first = i;
         size_t shared_count = shared_records(x, record->payload, &first);
+        size_t framed_end = 0;
+
+        if (record->has_fork_offsets)
+            for (int fork = 0; fork < 2; fork++) {
+                size_t offset = record->fork_offset[fork];
+
+                if (record->expanded[fork] > SIZE_MAX - offset)
+                    die("fork offset overflow");
+                size_t end = offset + record->expanded[fork];
+
+                if (end > framed_end)
+                    framed_end = end;
+            }
 
         if (shared_count == 1 && catalog_has_vise8_payloads(x->layout) && record->packed[0] &&
             record->packed[1] && record->expanded[0] && !record->expanded[1]) {
             extract_vise8_framed(x, i);
+        } else if (shared_count == 1 && record->has_fork_offsets && record->packed[0] &&
+                   record->packed[1] == framed_end && framed_end) {
+            extract_offset_forks(x, i);
         } else if (shared_count > 1) {
             if (i != first || shared_done[first])
                 continue;
@@ -333,25 +404,11 @@ static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *prese
     return unpack_code(packed, code);
 }
 
-static CatalogLayout choose_layout(Buffer data, size_t catalog_offset, Buffer data0,
-                                   bool data0_owned, bool direct_table, bool has_data0) {
+static CatalogLayout choose_layout(Buffer data, size_t catalog_offset, uint8_t revision) {
     bool compressed = be32(data, catalog_offset + 8) != 0;
-    uint8_t candidate[256];
 
-    if (!has_data0)
-        return CATALOG_VISE8;
-    if (direct_table && !compressed)
-        return catalog_direct_layout(data, catalog_offset);
-
-    /*
-     * Corpus installers from VISE 4.2 and 4.5 use compact records and contain
-     * the permutation literally in expanded DATA 0. Later initialization code
-     * constructs it instead.
-     */
-    if (data0_owned && !compressed && find_permutation(data0, candidate) == 1)
-        return CATALOG_COMPACT;
-
-    return compressed ? CATALOG_COMPRESSED : CATALOG_NORMAL;
+    return compressed ? catalog_compressed_layout(revision) :
+                        catalog_uncompressed_layout(revision);
 }
 
 static void load_table(Extraction *x, Buffer data0, bool direct_table, bool has_data0) {
@@ -402,6 +459,7 @@ int run_installer(const Options *options, const char *input_path) {
         die("truncated InstallerVISE SVCT data fork");
 
     uint32_t version = be32(input, 4);
+    uint8_t revision = input.p[0x13];
     uint32_t catalog_offset = be32(input, 0x24);
 
     if (catalog_offset >= input.n || !span(input, catalog_offset, 4) ||
@@ -416,7 +474,7 @@ int run_installer(const Options *options, const char *input_path) {
         .options = options,
         .data = input,
         .catalog_offset = catalog_offset,
-        .layout = choose_layout(input, catalog_offset, data0, data0_owned, direct_table, has_data0),
+        .layout = choose_layout(input, catalog_offset, revision),
     };
     Buffer catalog_data = input;
     size_t record_offset = catalog_offset;
@@ -431,13 +489,11 @@ int run_installer(const Options *options, const char *input_path) {
         record_offset = 0;
         catalog_owned = true;
 
-        if (!has_data0)
-            x.layout = catalog_pef_layout(catalog_data);
     }
 
     if (options->list || options->out) {
         x.records = catalog(catalog_data, record_offset, catalog_records, x.layout,
-                            options->raw_names, &x.count);
+                            options->raw_names, revision, &x.count);
         x.deferred = calloc(x.count, sizeof(*x.deferred));
         if (!x.deferred)
             die("out of memory");

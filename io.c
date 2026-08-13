@@ -1,5 +1,10 @@
 #include "unvise.h"
 
+#ifdef __APPLE__
+#include <sys/attr.h>
+#include <sys/xattr.h>
+#endif
+
 void die(const char *message) {
     fprintf(stderr, "unvise: %s\n", message);
     exit(1);
@@ -346,25 +351,52 @@ static char *appledouble_path(const char *path) {
     return sidecar;
 }
 
-static void write_appledouble(const char *path, const uint8_t *p, size_t n) {
-    enum { header_size = 26, entry_size = 12, data_offset = header_size + entry_size };
+static void write_appledouble(const char *path, const uint8_t *p, size_t n,
+                              const uint8_t finder_info[16], uint32_t created,
+                              uint32_t modified, bool resource) {
+    enum { header_size = 26, entry_size = 12, dates_size = 16, finder_size = 32 };
+    unsigned entries = resource ? 3 : 2;
+    size_t dates_offset = header_size + entries * entry_size;
+    size_t finder_offset = dates_offset + dates_size;
+    size_t resource_offset = finder_offset + finder_size;
+    size_t total = resource_offset + (resource ? n : 0);
 
-    if (n > UINT32_MAX || n > SIZE_MAX - data_offset)
+    if (n > UINT32_MAX || total < resource_offset || total > UINT32_MAX)
         die("resource fork is too large for AppleDouble");
 
-    Buffer sidecar = {calloc(data_offset + n, 1), data_offset + n};
+    Buffer sidecar = {calloc(total, 1), total};
 
     if (!sidecar.p)
         die("out of memory");
 
-    /* AppleDouble version 2 with one entry: ID 2 is the raw resource fork. */
+    /*
+     * AppleDouble version 2: ID 8 stores four signed times relative to
+     * 2000-01-01, ID 9 is Finder info, and ID 2 is the resource fork.  VISE
+     * supplies creation and modification times; unknown fields use the
+     * standard 0x80000000 marker.
+     */
     put_be32(sidecar.p, UINT32_C(0x00051607));
     put_be32(sidecar.p + 4, UINT32_C(0x00020000));
-    put_be16(sidecar.p + 24, 1);
-    put_be32(sidecar.p + 26, 2);
-    put_be32(sidecar.p + 30, data_offset);
-    put_be32(sidecar.p + 34, (uint32_t)n);
-    memcpy(sidecar.p + data_offset, p, n);
+    put_be16(sidecar.p + 24, (uint16_t)entries);
+    put_be32(sidecar.p + 26, 8);
+    put_be32(sidecar.p + 30, (uint32_t)dates_offset);
+    put_be32(sidecar.p + 34, dates_size);
+    put_be32(sidecar.p + dates_offset,
+             created ? created - UINT32_C(3029529600) : UINT32_C(0x80000000));
+    put_be32(sidecar.p + dates_offset + 4,
+             modified ? modified - UINT32_C(3029529600) : UINT32_C(0x80000000));
+    put_be32(sidecar.p + dates_offset + 8, UINT32_C(0x80000000));
+    put_be32(sidecar.p + dates_offset + 12, UINT32_C(0x80000000));
+    put_be32(sidecar.p + 38, 9);
+    put_be32(sidecar.p + 42, (uint32_t)finder_offset);
+    put_be32(sidecar.p + 46, finder_size);
+    memcpy(sidecar.p + finder_offset, finder_info, 16);
+    if (resource) {
+        put_be32(sidecar.p + 50, 2);
+        put_be32(sidecar.p + 54, (uint32_t)resource_offset);
+        put_be32(sidecar.p + 58, (uint32_t)n);
+        memcpy(sidecar.p + resource_offset, p, n);
+    }
 
     char *sidecar_path = appledouble_path(path);
 
@@ -374,13 +406,37 @@ static void write_appledouble(const char *path, const uint8_t *p, size_t n) {
     free(sidecar.p);
 }
 
-void write_output(const Options *o, const char *path, const char *fork, const uint8_t *p,
-                         size_t n) {
+#ifdef __APPLE__
+static void write_native_dates(const char *path, uint32_t created, uint32_t modified) {
+    enum { mac_to_unix = 2082844800U };
+    struct attrlist attributes = {0};
+    struct timespec dates[2];
+    size_t count = 0;
+
+    attributes.bitmapcount = ATTR_BIT_MAP_COUNT;
+    if (created) {
+        attributes.commonattr |= ATTR_CMN_CRTIME;
+        dates[count].tv_sec = (time_t)((int64_t)created - mac_to_unix);
+        dates[count++].tv_nsec = 0;
+    }
+    if (modified) {
+        attributes.commonattr |= ATTR_CMN_MODTIME;
+        dates[count].tv_sec = (time_t)((int64_t)modified - mac_to_unix);
+        dates[count++].tv_nsec = 0;
+    }
+    if (count && setattrlist(path, &attributes, dates, count * sizeof(*dates), 0))
+        die_errno(path);
+}
+#endif
+
+void write_output(const Options *o, const char *path, const char *fork, const uint8_t *p, size_t n,
+                  const uint8_t finder_info[16], uint32_t created, uint32_t modified) {
     if (o->appledouble) {
-        if (!strcmp(fork, "data"))
+        if (!strcmp(fork, "data")) {
             write_file(path, p, n);
-        else
-            write_appledouble(path, p, n);
+            write_appledouble(path, NULL, 0, finder_info, created, modified, false);
+        } else
+            write_appledouble(path, p, n, finder_info, created, modified, true);
         return;
     }
 
@@ -407,12 +463,22 @@ void write_output(const Options *o, const char *path, const char *fork, const ui
         free(resource_path);
     }
 
+    uint8_t extended_finder_info[32] = {0};
+
+    memcpy(extended_finder_info, finder_info, 16);
+    if (setxattr(path, "com.apple.FinderInfo", extended_finder_info,
+                 sizeof(extended_finder_info), 0, 0))
+        die_errno(path);
+    write_native_dates(path, created, modified);
+
 #else
     (void)path;
     (void)fork;
     (void)p;
     (void)n;
+    (void)finder_info;
+    (void)created;
+    (void)modified;
     die("-n is only supported on macOS");
 #endif
 }
-

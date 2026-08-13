@@ -7,9 +7,9 @@
  *
  * The implementation is tested against 36 freeware, shareware, demo, and
  * InstallerVISE self-installer archives made with Lite 3.6 and versions 4.2
- * through 8.5. It remains reverse-engineered: password-protected
- * members, inferred catalog boundaries, and Active Install external payloads
- * are documented limitations.
+ * through 8.5. It remains reverse-engineered: password-protected members,
+ * some hierarchy rules and Active Install external
+ * payloads are documented limitations.
  */
 
 static void usage(FILE *f) {

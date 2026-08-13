@@ -1,7 +1,11 @@
 #ifndef UNVISE_H
 #define UNVISE_H
 
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#else
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <errno.h>
 #include <inttypes.h>
@@ -25,11 +29,13 @@ typedef struct {
     size_t output_group;
     char tag[5];
     char *name, *path;
-    bool file;
-    uint32_t parent, dir_id, payload;
+    bool file, has_fork_offsets;
+    uint32_t parent, dir_id, payload, checksum, created, modified;
+    uint32_t record_flags;
     uint16_t depth, fixed_size;
     uint32_t packed[2], expanded[2];
-    uint32_t gap;
+    uint32_t fork_offset[2];
+    uint8_t finder_info[16];
 } Record;
 
 typedef struct {
@@ -61,7 +67,8 @@ bool read_sidecar_resource_fork(const char *path, Buffer *resource);
 void mkdirs(const char *path);
 void make_parent_dir(const char *path);
 bool resource_find(Buffer r, const char type[4], int wanted, Buffer *result);
-void write_output(const Options *o, const char *path, const char *fork, const uint8_t *p, size_t n);
+void write_output(const Options *o, const char *path, const char *fork, const uint8_t *p, size_t n,
+                  const uint8_t finder_info[16], uint32_t created, uint32_t modified);
 
 Buffer unpack_code(Buffer p, Buffer code);
 unsigned find_permutation(Buffer b, uint8_t table[256]);
@@ -72,13 +79,12 @@ Buffer inflate_catalog(Buffer data, size_t catalog_offset);
 
 bool catalog_is_packed(CatalogLayout layout);
 bool catalog_has_vise8_payloads(CatalogLayout layout);
-CatalogLayout catalog_pef_layout(Buffer data);
-CatalogLayout catalog_direct_layout(Buffer data, size_t offset);
+CatalogLayout catalog_compressed_layout(uint8_t revision);
+CatalogLayout catalog_uncompressed_layout(uint8_t revision);
 Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,
-                size_t *count);
-void print_quoted(const char *s, bool raw);
-char *output_path(const Options *options, Record *records, size_t index, const char *fork,
-                  const char *variant);
+                uint8_t revision, size_t *count);
+void print_quoted(FILE *f, const char *s, bool raw);
+char *output_path(const Options *options, Record *records, size_t index, const char *fork);
 int run_installer(const Options *options, const char *input_path);
 
 #endif
