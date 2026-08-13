@@ -1,6 +1,11 @@
 #include "unvise.h"
 
 typedef struct {
+    Buffer fork[2];
+    bool have[2], emitted;
+} DeferredOutput;
+
+typedef struct {
     const Options *options;
     Buffer data;
     uint32_t catalog_offset;
@@ -8,6 +13,7 @@ typedef struct {
     Record *records;
     size_t count;
     uint8_t table[256];
+    DeferredOutput *deferred;
 } Extraction;
 
 static bool record_has_payload(const Record *record) {
@@ -57,6 +63,70 @@ static void write_fork_variant(const Extraction *x, size_t index, int fork, cons
 static void write_fork(const Extraction *x, size_t index, int fork, const uint8_t *data,
                        size_t size) {
     write_fork_variant(x, index, fork, data, size, NULL);
+}
+
+static bool same_deferred_record(const Extraction *x, size_t a, size_t b) {
+    for (int fork = 0; fork < 2; fork++) {
+        size_t expected_a = x->records[a].expanded[fork];
+        size_t expected_b = x->records[b].expanded[fork];
+
+        if (!!expected_a != !!expected_b)
+            return false;
+        if (expected_a &&
+            (x->deferred[a].fork[fork].n != x->deferred[b].fork[fork].n ||
+             memcmp(x->deferred[a].fork[fork].p, x->deferred[b].fork[fork].p,
+                    x->deferred[a].fork[fork].n)))
+            return false;
+    }
+    return true;
+}
+
+static bool deferred_record_complete(const Extraction *x, size_t index) {
+    for (int fork = 0; fork < 2; fork++)
+        if (x->records[index].expanded[fork] && !x->deferred[index].have[fork])
+            return false;
+    return true;
+}
+
+static void finish_deferred_record(const Extraction *x, size_t index) {
+    DeferredOutput *output = &x->deferred[index];
+    size_t group = x->records[index].output_group;
+
+    for (size_t i = group; i < index; i++)
+        if (x->records[i].output_group == group && x->deferred[i].emitted &&
+            same_deferred_record(x, i, index)) {
+            for (int fork = 0; fork < 2; fork++) {
+                free(output->fork[fork].p);
+                output->fork[fork] = (Buffer){0};
+            }
+            return;
+        }
+
+    for (int fork = 0; fork < 2; fork++)
+        if (output->have[fork])
+            write_fork(x, index, fork, output->fork[fork].p, output->fork[fork].n);
+    output->emitted = true;
+}
+
+static void emit_fork(const Extraction *x, size_t index, int fork, const uint8_t *data,
+                      size_t size) {
+    DeferredOutput *output;
+
+    if (x->records[index].output_group == SIZE_MAX) {
+        write_fork(x, index, fork, data, size);
+        return;
+    }
+
+    output = &x->deferred[index];
+    output->fork[fork].p = malloc(size ? size : 1);
+    if (!output->fork[fork].p)
+        die("out of memory");
+    memcpy(output->fork[fork].p, data, size);
+    output->fork[fork].n = size;
+    output->have[fork] = true;
+
+    if (deferred_record_complete(x, index))
+        finish_deferred_record(x, index);
 }
 
 static void extract_version_source(const Extraction *x, size_t index) {
@@ -138,7 +208,7 @@ static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expa
                     if (position > expanded.n || size > expanded.n - position)
                         die("shared payload layout overflow");
 
-                    write_fork(x, i, fork, expanded.p + position, size);
+                    emit_fork(x, i, fork, expanded.p + position, size);
                     position += size;
                 }
 
@@ -168,7 +238,7 @@ static void extract_vise8_framed(const Extraction *x, size_t index) {
     if (record->expanded[0] > expanded.n)
         die("VISE 8 framed payload is shorter than its data fork");
 
-    write_fork(x, index, 0, expanded.p, record->expanded[0]);
+    emit_fork(x, index, 0, expanded.p, record->expanded[0]);
     free(expanded.p);
 }
 
@@ -183,7 +253,7 @@ static void extract_separate_forks(const Extraction *x, size_t index) {
             Buffer expanded = inflate_member(slice(x->data, position, record->packed[fork]),
                                              x->table, record->expanded[fork]);
 
-            write_fork(x, index, fork, expanded.p, expanded.n);
+            emit_fork(x, index, fork, expanded.p, expanded.n);
             free(expanded.p);
             position += record->packed[fork];
         }
@@ -223,6 +293,10 @@ static void extract_records(const Extraction *x) {
     }
 
     free(shared_done);
+
+    for (size_t i = 0; i < x->count; i++)
+        for (int fork = 0; fork < 2; fork++)
+            free(x->deferred[i].fork[fork].p);
 }
 
 static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *present) {
@@ -364,8 +438,12 @@ int run_installer(const Options *options, const char *input_path) {
     if (options->list || options->out) {
         x.records = catalog(catalog_data, record_offset, catalog_records, x.layout,
                             options->raw_names, &x.count);
+        x.deferred = calloc(x.count, sizeof(*x.deferred));
+        if (!x.deferred)
+            die("out of memory");
         load_table(&x, data0, direct_table, has_data0);
         extract_records(&x);
+        free(x.deferred);
         free_records(x.records, x.count);
     }
 

@@ -197,10 +197,11 @@ Several `FVCT` records may reference one compressed member:
   architecture, localization, or version checks.
 - Alternatives are not assumed identical. Divergent fork contents occur in
   every affected catalog layout in the corpus.
-- `unvise` gives every output-bearing record a `~NNNN` suffix, where `NNNN` is
-  its stable catalog record number. This also prevents collisions on
-  case-insensitive or Unicode-normalizing filesystems. Data and resource forks
-  from one record retain the same suffix.
+- Records whose complete set of forks is byte-identical to an earlier record
+  at the same logical pathname are omitted. The lowest-numbered distinct
+  record retains the logical pathname. Later distinct records receive a
+  `~NNNN` suffix, where `NNNN` is the stable catalog record number. Data and
+  resource forks from one record retain the same suffix.
 - A version-source record can also participate in an ordinary shared payload.
   Both byte sequences are retained; the version-source form has an additional
   `-version` suffix.

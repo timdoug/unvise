@@ -326,7 +326,7 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
         size += variable;
         break;
     case 2:
-        if ((record_type >> 24) != 3)
+        if (fixed >= 0xba && (record_type >> 24) != 3)
             size += variable;
         break;
     case 3:
@@ -702,8 +702,24 @@ static void append_record_suffix(Record *record, size_t index) {
 static void plan_output_paths(Record *all, size_t count) {
     for (size_t i = 0; i < count; i++) {
         all[i].path = record_relative_path(all, count, i);
-        if (record_outputs_fork(&all[i]))
-            append_record_suffix(&all[i], i);
+        all[i].output_group = SIZE_MAX;
+    }
+
+    /*
+     * Preserve the ordinary pathname for the first output-bearing record.
+     * Later records targeting that same catalog path are conditional
+     * alternatives and receive their stable record number.
+     */
+    for (size_t i = 0; i < count; i++) {
+        if (!record_outputs_fork(&all[i]))
+            continue;
+        for (size_t j = 0; j < i; j++)
+            if (record_outputs_fork(&all[j]) && !strcmp(all[i].path, all[j].path)) {
+                all[j].output_group = j;
+                all[i].output_group = j;
+                append_record_suffix(&all[i], i);
+                break;
+            }
     }
 }
 

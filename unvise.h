@@ -22,6 +22,7 @@ typedef struct {
 
 typedef struct {
     size_t off, end;
+    size_t output_group;
     char tag[5];
     char *name, *path;
     bool file;
