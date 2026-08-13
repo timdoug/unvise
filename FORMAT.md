@@ -66,9 +66,9 @@ Observed layouts:
 | Layout | Catalog storage | InstallerVISE versions in the corpus |
 | --- | --- | --- |
 | Lite | uncompressed, names at record ends | Lite 3.6 |
-| Compact | uncompressed, shorter records | 4.2, 4.5 |
+| Compact | uncompressed, shorter records | 4.2, 4.5, 4.6.1 |
 | Normal | uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
-| Compressed | word-swapped raw DEFLATE | 6.5, 7.0 |
+| Compressed | word-swapped raw DEFLATE | 6.5, 7.0, 7.3 |
 | VISE 8 | compressed, with later name offsets | 8.0.2 |
 
 These are observed record/storage layouts, not version numbers. In particular,
@@ -89,14 +89,14 @@ its catalog contains a `PACK` record.
 For a compressed catalog, the name moves to `+0x98`; VISE 8 moves it eight
 bytes farther to `+0xa0`. The ID fields do not move.
 
-### Compact catalog (observed in VISE 4.2 and 4.5)
+### Compact catalog
 
-- Both independently sourced VISE 4.2 installers and the VISE 4.5 installer
-  in the corpus use this layout.
+- VISE 4.2, 4.5, and 4.6.1 installers use this layout.
 - Their directory records are only `0x5b` to `0x68` bytes long, ruling out the
   normal layout's name at `+0x94`.
 - Directory and parent IDs remain at `+0x1c` and `+0x20`.
-- The MacRoman name begins at `+0x58`.
+- The MacRoman name begins at `+0x58`, or `+0x68` when the record contains the
+  observed 16-byte extension.
 
 ### Lite 3.6 short catalog
 
@@ -124,11 +124,14 @@ bytes farther to `+0xa0`. The ID fields do not move.
 For a compressed catalog, the name moves to `+0xbe`; VISE 8 moves it eight
 bytes farther to `+0xc6`. The fork and payload fields do not move.
 
-### Compact catalog (observed in VISE 4.2 and 4.5)
+### Compact catalog
 
 - Fork sizes and the payload offset retain their common offsets.
 - The parent directory ID is at `+0x60`.
-- The MacRoman name begins at `+0x7c`.
+- The MacRoman name begins at `+0x7c`, or `+0x8c` with the 16-byte extension.
+- Some localized self-installer records contain no usable trailing filename.
+  Their shared payload members are still distinct; output paths use the stable
+  catalog record number so no variant overwrites another.
 
 ### Lite 3.6 short catalog
 
@@ -197,9 +200,11 @@ data fork | version-source material | resource fork
 - `unvise` searches for a unique permutation instead of relying on that offset.
 - No `CODE` 24 resource is required.
 
-### VISE 4.2 through 7
+### VISE 4.2 through 7.0
 
 - `DATA` resource 0 is normally an `A89F000C` packed-code stream.
+- The verified 4.5 and 4.6.1 self-installers instead store the permutation
+  literally; this does not make their catalogs Lite records.
 - VISE 4.5 uses `CODE` 18 as its word dictionary and places the permutation
   directly in the expanded resource.
 - `CODE` 24 normally supplies its word dictionary.
@@ -220,6 +225,17 @@ Observed permutation addresses:
 
 `unvise` identifies the unique initialized 256-byte permutation instead of
 selecting an address by version.
+
+### VISE 7.3
+
+- `DATA` 0 and its initialization program are absent in the verified Carbon
+  installer.
+- The permutation is recovered from the initialized data of the input PEF
+  application, as in VISE 8.
+- Catalog records retain the ordinary compressed-layout name offsets
+  (`DVCT+0x98` and `FVCT+0xbe`).
+- `unvise` distinguishes this layout from VISE 8 by checking those offsets for
+  complete MacRoman names after inflating the catalog.
 
 ### VISE 8.0.2
 
@@ -329,7 +345,8 @@ Processing order:
 | --- | --- |
 | Lite 3.6 | RAM Charger 8.1; IconDropper 3.0; BarbaBatch 3.1 Demo; UTC Display |
 | 4.2 | Internet Explorer 3.0a Java; OMS 2.3.2 Web |
-| 4.5 | PGP 5.0 Freeware |
+| 4.5 | PGP 5.0 Freeware; Installer VISE 4.5 |
+| 4.6.1 | Installer VISE 4.6.1 |
 | 5.0.1 | Mac F2C 1.4.1 |
 | 5.5 | Startup Lock 2.5; InstallerVISE 5.5 Demo |
 | 5.5.1 | BBEdit 5.0 Demo |
@@ -338,4 +355,5 @@ Processing order:
 | 6.0.1 | InstallerVISE 6.0.1 |
 | 6.5 | Visual Projector 2.0; InstallerVISE 6.5 Demo; iControl 1.2 |
 | 7.0 | Interarchy 4.0; Interarchy 3.8 |
+| 7.3 | HP LaserJet 4/5/6 legacy driver |
 | 8.0.2 | MacPython 2.2.3; MacPython 2.3.3 |

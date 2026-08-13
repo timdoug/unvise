@@ -8,23 +8,6 @@ bool catalog_has_vise8_payloads(CatalogLayout layout) {
     return layout == CATALOG_VISE8;
 }
 
-static size_t catalog_name_offset(CatalogLayout layout, bool file) {
-    switch (layout) {
-    case CATALOG_LITE:
-        return 0; /* Length-prefixed names are found from the record end. */
-    case CATALOG_COMPACT:
-        return file ? 0x7c : 0x58;
-    case CATALOG_NORMAL:
-        return file ? 0xba : 0x94;
-    case CATALOG_COMPRESSED:
-        return file ? 0xbe : 0x98;
-    case CATALOG_VISE8:
-        return file ? 0xc6 : 0xa0;
-    }
-
-    return 0;
-}
-
 static void utf8_add(char **q, uint32_t c) {
     if (c < 0x80)
         *(*q)++ = (char)c;
@@ -80,6 +63,17 @@ static char *convert_name(const uint8_t *p, size_t n, bool raw) {
     return s;
 }
 
+static bool valid_name(Buffer data, size_t start, size_t end) {
+    if (start >= end)
+        return false;
+
+    for (size_t i = start; i < end; i++)
+        if ((data.p[i] < 0x20 && data.p[i] != '\r') || data.p[i] == 0x7f)
+            return false;
+
+    return true;
+}
+
 static char *record_name(Buffer data, Record *r, CatalogLayout layout, bool raw_names) {
     if (layout == CATALOG_LITE &&
         (!strcmp(r->tag, "FVCT") || !strcmp(r->tag, "DVCT"))) {
@@ -97,12 +91,34 @@ static char *record_name(Buffer data, Record *r, CatalogLayout layout, bool raw_
         return NULL;
     }
 
-    bool file = !strcmp(r->tag, "FVCT");
-    size_t start = (file || !strcmp(r->tag, "DVCT")) ? catalog_name_offset(layout, file) : 0;
-    if (!start || r->off + start >= r->end)
+    static const uint8_t file_offsets[] = {0x7c, 0x8c, 0xba, 0xbe, 0xc6};
+    static const uint8_t directory_offsets[] = {0x58, 0x68, 0x94, 0x98, 0xa0};
+    const uint8_t *offsets;
+    size_t count;
+
+    if (!strcmp(r->tag, "FVCT")) {
+        offsets = file_offsets;
+        count = sizeof(file_offsets);
+    } else if (!strcmp(r->tag, "DVCT")) {
+        offsets = directory_offsets;
+        count = sizeof(directory_offsets);
+    } else
         return NULL;
-    size_t n = r->end - (r->off + start);
-    return convert_name(data.p + r->off + start, n, raw_names);
+
+    /*
+     * The fixed record body grew in several independently selected steps.
+     * Names always occupy the complete trailing field. Trying the observed
+     * field boundaries in order identifies the actual record shape locally;
+     * binary metadata before the name fails valid_name().
+     */
+    for (size_t i = 0; i < count; i++) {
+        size_t start = r->off + offsets[i];
+
+        if (valid_name(data, start, r->end))
+            return convert_name(data.p + start, r->end - start, raw_names);
+    }
+
+    return NULL;
 }
 
 void print_quoted(const char *s, bool raw) {
@@ -125,6 +141,67 @@ void print_quoted(const char *s, bool raw) {
 static bool is_tag(const uint8_t *p) {
     return !memcmp(p, "CVCT", 4) || !memcmp(p, "DVCT", 4) || !memcmp(p, "FVCT", 4) ||
            !memcmp(p, "PACK", 4);
+}
+
+CatalogLayout catalog_direct_layout(Buffer data, size_t offset) {
+    /*
+     * A literal substitution table is used by both Lite and some full VISE
+     * self-installers. Full compact records expose a complete trailing name at
+     * one of their two observed boundaries; Lite records instead use a Pascal
+     * name and trailer.
+     */
+    for (size_t position = offset; position + 4 <= data.n;) {
+        while (position + 4 <= data.n && !is_tag(data.p + position))
+            position++;
+        if (position + 4 > data.n)
+            break;
+
+        size_t end = position + 4;
+        while (end + 4 <= data.n && !is_tag(data.p + end))
+            end++;
+
+        if (!memcmp(data.p + position, "DVCT", 4) &&
+            (valid_name(data, position + 0x58, end) ||
+             valid_name(data, position + 0x68, end)))
+            return CATALOG_COMPACT;
+        if (!memcmp(data.p + position, "FVCT", 4) &&
+            (valid_name(data, position + 0x7c, end) ||
+             valid_name(data, position + 0x8c, end)))
+            return CATALOG_COMPACT;
+
+        position = end;
+    }
+
+    return CATALOG_LITE;
+}
+
+CatalogLayout catalog_pef_layout(Buffer data) {
+    /*
+     * Carbon-era VISE 7 and VISE 8 both keep the substitution table in the
+     * PEF application rather than DATA 0. At the ordinary compressed-catalog
+     * name offset VISE 8 has binary metadata, while VISE 7 has a complete
+     * printable MacRoman name.
+     */
+    for (size_t offset = 0; offset + 4 <= data.n;) {
+        while (offset + 4 <= data.n && !is_tag(data.p + offset))
+            offset++;
+        if (offset + 4 > data.n)
+            break;
+
+        size_t end = offset + 4;
+        while (end + 4 <= data.n && !is_tag(data.p + end))
+            end++;
+        if (!memcmp(data.p + offset, "DVCT", 4) &&
+            valid_name(data, offset + 0x98, end))
+            return CATALOG_COMPRESSED;
+        if (!memcmp(data.p + offset, "FVCT", 4) &&
+            valid_name(data, offset + 0xbe, end))
+            return CATALOG_COMPRESSED;
+
+        offset = end;
+    }
+
+    return CATALOG_VISE8;
 }
 
 static Record *scan_catalog(Buffer data, size_t offset, size_t *count) {
@@ -295,6 +372,15 @@ static char *safe_name(const char *name, bool flat) {
     return s;
 }
 
+static char *record_path_name(const Record *all, const Record *record) {
+    if (record->name)
+        return safe_name(record->name, false);
+
+    char fallback[32];
+    snprintf(fallback, sizeof(fallback), "unnamed-%04zu", (size_t)(record - all));
+    return safe_name(fallback, false);
+}
+
 static Record *dir_by_id(Record *r, size_t n, uint32_t id) {
     for (size_t i = 0; i < n; i++)
         if (!strcmp(r[i].tag, "DVCT") && r[i].dir_id == id)
@@ -305,7 +391,7 @@ static Record *dir_by_id(Record *r, size_t n, uint32_t id) {
 char *output_path(const Options *o, Record *all, size_t count, size_t index,
                          const char *fork) {
     Record *r = &all[index];
-    char *name = safe_name(r->name ? r->name : "unnamed", false);
+    char *name = record_path_name(all, r);
     size_t cap = strlen(o->out) + strlen(name) + 128;
     char **parts = calloc(count, sizeof(char *));
     size_t np = 0;
@@ -316,7 +402,7 @@ char *output_path(const Options *o, Record *all, size_t count, size_t index,
         Record *d = dir_by_id(all, count, parent);
         if (!d)
             break;
-        parts[np++] = safe_name(d->name ? d->name : "unnamed", false);
+        parts[np++] = record_path_name(all, d);
         parent = d->parent;
     }
     for (size_t i = 0; i < np; i++)
@@ -341,5 +427,3 @@ char *output_path(const Options *o, Record *all, size_t count, size_t index,
     free(name);
     return path;
 }
-
-

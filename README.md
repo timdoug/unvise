@@ -2,17 +2,18 @@
 
 `unvise` extracts classic Macintosh InstallerVISE archives on modern macOS and
 other Linux/BSD/POSIX systems. It reads and writes native macOS forks where supported, AppleDouble
-sidecars, and raw `.data`/`.rsrc` fork pairs. I've verified it against 30
+sidecars, and raw `.data`/`.rsrc` fork pairs. I've tested it against 36
 freeware, shareware, and demo installer archives; should be relatively comprehensive, but no promises, patches encouraged!
 
 | InstallerVISE | Supported format features |
 | --- | --- |
 | Lite 3.6 | short catalogs, direct substitution tables |
-| 4.2, 4.5 | compact catalogs, packed initialization, short action records and parameter fields |
+| 4.2, 4.5, 4.6.1 | compact and extended-compact records, literal or packed initialization, short actions |
 | 5.0.1, 5.5, 5.5.1, 5.5.2 | packed initialization code, shared payloads, file and action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
 | 6.5 | compressed catalogs |
 | 7.0 | alternate initialization resources, version-source payloads |
+| 7.3 | PEF-embedded substitution table with ordinary compressed catalog records |
 | 8.0.2 | later compressed catalogs, PEF-embedded substitution table, framed payloads |
 
 Across these versions, `unvise` supports data and resource forks, catalog
@@ -145,8 +146,8 @@ StuffIt archives, but the 16 StuffIt files in the corpus require `unar`.
 
 Password-protected archives are unsupported. The corpus contains one VISE 6
 Active Install stub in two wrappers; `unvise` recognizes it, but does not
-locate or decode its external payload archive. Native MSVC builds are
-unsupported.
+locate or decode its external payload archive. VISE 8.5 adds an unresolved
+payload variant. Native MSVC builds are unsupported.
 
 See [FORMAT.md](FORMAT.md) for the reverse-engineered format details.
 

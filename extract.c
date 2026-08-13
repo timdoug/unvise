@@ -261,7 +261,7 @@ static CatalogLayout choose_layout(Buffer data, size_t catalog_offset, Buffer da
     if (!has_data0)
         return CATALOG_VISE8;
     if (direct_table && !compressed)
-        return CATALOG_LITE;
+        return catalog_direct_layout(data, catalog_offset);
 
     /*
      * Corpus installers from VISE 4.2 and 4.5 use compact records and contain
@@ -346,6 +346,9 @@ int run_installer(const Options *options, const char *input_path) {
         catalog_data = inflate_catalog(input, catalog_offset);
         record_offset = 0;
         catalog_owned = true;
+
+        if (!has_data0)
+            x.layout = catalog_pef_layout(catalog_data);
     }
 
     if (options->list || options->out) {
@@ -365,4 +368,3 @@ int run_installer(const Options *options, const char *input_path) {
 
     return 0;
 }
-

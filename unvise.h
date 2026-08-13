@@ -70,6 +70,8 @@ Buffer inflate_catalog(Buffer data, size_t catalog_offset);
 
 bool catalog_is_packed(CatalogLayout layout);
 bool catalog_has_vise8_payloads(CatalogLayout layout);
+CatalogLayout catalog_pef_layout(Buffer data);
+CatalogLayout catalog_direct_layout(Buffer data, size_t offset);
 Record *catalog(Buffer data, size_t offset, CatalogLayout layout, bool raw_names, size_t *count);
 void print_quoted(const char *s, bool raw);
 char *output_path(const Options *options, Record *records, size_t count, size_t index,

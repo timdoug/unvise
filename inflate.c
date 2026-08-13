@@ -410,5 +410,3 @@ Buffer inflate_catalog(Buffer data, size_t catalog) {
 
     return out;
 }
-
-
