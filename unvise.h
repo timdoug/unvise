@@ -68,6 +68,7 @@ char *data_fork_path(const char *path);
 bool read_native_resource_fork(const char *path, Buffer *resource);
 #endif
 bool read_sidecar_resource_fork(const char *path, Buffer *resource);
+void unwrap_transport(Buffer *data, Buffer *resource, bool *have_resource);
 void mkdirs(const char *path);
 void make_parent_dir(const char *path);
 bool resource_find(Buffer r, const char type[4], int wanted, Buffer *result);

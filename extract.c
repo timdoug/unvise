@@ -646,6 +646,12 @@ static Buffer companion_archive(const char *input_path, const char *resolved_pat
 
     Buffer companion = read_file(path);
     free(path);
+    Buffer companion_resource = {0};
+    bool have_companion_resource = false;
+
+    unwrap_transport(&companion, &companion_resource, &have_companion_resource);
+    if (have_companion_resource)
+        free(companion_resource.p);
     if (companion.n >= 4 && !memcmp(companion.p, "SVCT", 4)) {
         free(companion.p);
         return input;
@@ -661,14 +667,15 @@ int run_installer(const Options *options, const char *input_path) {
     Buffer resource = {0};
     bool found_resource = false;
 
-    if (input.n < 4 || memcmp(input.p, "SVCT", 4))
-        die("not an InstallerVISE data fork; unpack MacBinary, BinHex, or StuffIt first");
-
 #ifdef __APPLE__
     found_resource = read_native_resource_fork(resolved_path, &resource);
 #endif
     if (!found_resource)
         found_resource = read_sidecar_resource_fork(resolved_path, &resource);
+    unwrap_transport(&input, &resource, &found_resource);
+
+    if (input.n < 4 || memcmp(input.p, "SVCT", 4))
+        die("not an InstallerVISE application; unpack any StuffIt layer first");
     if (!found_resource)
         die_missing_resource_fork();
 

@@ -2,7 +2,8 @@
 
 `unvise` extracts classic Macintosh InstallerVISE archives on modern macOS and
 Linux, BSD, and other POSIX systems. It reads and writes native macOS forks,
-AppleDouble sidecars, and raw `.data`/`.rsrc` fork pairs.
+AppleDouble sidecars, and raw `.data`/`.rsrc` fork pairs. MacBinary and BinHex
+transport layers are decoded directly, including nested layers.
 
 Expanded files are verified against the CRC-32 stored in their catalog
 records. Directory hierarchy, Finder information, and timestamps are preserved
@@ -37,7 +38,8 @@ Build with a C99 compiler and zlib:
 make
 ```
 
-After extracting any outer archive, list the installer catalog:
+List the installer catalog directly, or after extracting an enclosing StuffIt
+archive:
 
 ```console
 $ installer="Escape Velocity Installer"
@@ -96,34 +98,36 @@ whose filesystem APIs require valid UTF-8 paths.
 
 ## Preparing inputs
 
-MacBinary, BinHex, and StuffIt are common outer containers. Unpack them while
-keeping both Macintosh forks, then pass the InstallerVISE data fork to
-`unvise`.
+MacBinary, BinHex, and StuffIt are common outer containers. `unvise` decodes
+MacBinary and BinHex itself. StuffIt must be unpacked separately while keeping
+both Macintosh forks.
 
 Accepted installer inputs:
 
-| Data fork | Resource fork | Representation |
-| --- | --- | --- |
-| `Installer` | native fork on the same file | macOS |
-| `Installer` | `._Installer` | AppleDouble |
-| `Installer.data` | raw `Installer.rsrc` | `macunpack -f` |
+| Input | Representation |
+| --- | --- |
+| `Installer.bin` | MacBinary, including nested MacBinary |
+| `Installer.hqx` | BinHex, including nested BinHex or MacBinary |
+| `Installer` with a native resource fork | macOS |
+| `Installer` plus `._Installer` | AppleDouble |
+| `Installer.data` plus `Installer.rsrc` | raw forks from `macunpack -f` |
 
 For a raw pair, `unvise` accepts `Installer`, `Installer.data`, or
 `Installer.rsrc` and resolves both files automatically.
 
-`unar` handles all three formats. For a direct MacBinary or StuffIt download:
+MacBinary and BinHex files containing an installer can be passed directly:
 
 ```sh
-unar -k hidden package.bin        # also accepts .sit
-./unvise -x output Installer
+./unvise -x output Installer.bin
+./unvise -x output Installer.hqx
 ```
 
-BinHex downloads commonly contain a StuffIt archive. Extract each layer while
-retaining hidden AppleDouble files:
+StuffIt compression remains outside `unvise`. If a MacBinary or BinHex layer
+contains StuffIt, `unvise` identifies that an archive layer remains. `unar`
+can remove the complete transport/archive chain while retaining both forks:
 
 ```sh
-unar -nr -k hidden package.hqx    # produces the enclosed .sit file
-unar -k hidden package.sit        # produces Installer and ._Installer
+unar -k hidden package.hqx        # also accepts .sit or .bin
 ./unvise -x output Installer
 ```
 
@@ -131,8 +135,7 @@ Keep a separate `Installer.data` payload archive beside `Installer`; it is
 detected automatically. This is distinct from a macutils `.data`/`.rsrc` fork
 pair, for which `Installer` itself does not exist.
 
-The traditional `macutils` tools provide a tested path for direct MacBinary
-installers:
+The traditional `macutils` tools remain an alternative:
 
 ```sh
 macunpack -f Installer.bin        # produces Installer.data and Installer.rsrc

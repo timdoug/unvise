@@ -2,8 +2,8 @@
 
 /*
  * unvise decodes the InstallerVISE layer of a classic Macintosh installer.
- * MacBinary, BinHex, and StuffIt are transport/archive formats outside its
- * scope; remove them first with unar or macutils while preserving both forks.
+ * MacBinary and BinHex transport layers are decoded recursively. StuffIt is
+ * outside its scope and must be removed first while preserving both forks.
  *
  * The implementation is tested against a broad corpus of freeware, shareware,
  * demo, and InstallerVISE self-installer archives made with Lite 3.6 and

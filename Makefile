@@ -9,7 +9,7 @@ DESTDIR ?=
 INSTALL ?= install
 MKDIR_P ?= mkdir -p
 RM ?= rm -f
-OBJS = unvise.o extract.o io.o init.o inflate.o catalog.o
+OBJS = unvise.o extract.o io.o transport.o init.o inflate.o catalog.o
 
 .PHONY: all clean install
 

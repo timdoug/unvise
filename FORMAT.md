@@ -19,11 +19,19 @@ An installer is a classic Macintosh file with two forks:
 
 Accepted representations:
 
+- MacBinary and BinHex containers; consecutive layers are decoded recursively.
 - Native macOS data and resource forks.
 - `Installer` plus `._Installer` AppleDouble from `unar -k hidden`.
 - Raw `Installer.data` plus `Installer.rsrc` from `macunpack -f`.
 
-MacBinary, BinHex, and StuffIt are outer formats and must be removed first.
+MacBinary fork offsets and lengths are checked against the enclosing stream.
+Historical MacBinary header CRCs are not required: one preserved installer in
+the corpus has an invalid header CRC but valid, complete forks. BinHex headers,
+data forks, and resource forks are checked against their CRC-16 values.
+
+StuffIt is an archive/compression format rather than a fork transport. It must
+be removed with a separate archive tool; any surrounding MacBinary or BinHex
+layers may be left for `unvise`.
 
 ## SVCT data fork
 
