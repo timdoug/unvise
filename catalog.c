@@ -169,12 +169,27 @@ static size_t late_file_size(Buffer data, size_t offset) {
 
     switch (action_tail ? type : UINT_MAX) {
     case 3:
-    case 4:
-    case 5:
     case 7:
     case 9:
     case 10: {
         size_t length_offset = size;
+
+        if (!span(data, offset + length_offset, 1))
+            die("truncated late action string");
+        size = length_offset + 1 + data.p[offset + length_offset];
+        break;
+    }
+    case 4:
+        /* Some late replace actions append an optional Pascal display name. */
+        if (span(data, offset + size, 4) &&
+            memcmp(data.p + offset + size, "DVCT", 4) &&
+            memcmp(data.p + offset + size, "FVCT", 4) &&
+            memcmp(data.p + offset + size, "PACK", 4))
+            size += 1 + data.p[offset + size];
+        break;
+    case 5: {
+        /* Alias actions store variable text, a declared message, then a Pascal name. */
+        size_t length_offset = size + be16(data, offset + 0x38);
 
         if (!span(data, offset + length_offset, 1))
             die("truncated late action string");
@@ -207,11 +222,10 @@ static size_t late_file_size(Buffer data, size_t offset) {
 
 static uint16_t late_directory_fixed(uint8_t revision) {
     /*
-     * Both recovered VISE 8.0.2 PPC loaders read 0xa0 bytes; both recovered
-     * VISE 8.5 loaders read 0xa4. Revision 13 is accepted only when its catalog
-     * contains no DVCT records; its directory body has not been recovered.
+     * Recovered VISE 8.0.2 PPC loaders and revision-13 corpus records use
+     * 0xa0 bytes; both recovered VISE 8.5 loaders read 0xa4.
      */
-    if (revision == 12)
+    if (revision == 12 || revision == 13)
         return 0xa0;
     if (revision == 14)
         return 0xa4;
@@ -262,7 +276,7 @@ static Record *parse_late_catalog(Buffer data, size_t expected, uint8_t revision
     return records;
 }
 
-static size_t variable_file_size(Buffer data, size_t offset, size_t fixed, bool padded_type5) {
+static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
     if (!span(data, offset, fixed))
         die("truncated FVCT record");
 
@@ -282,13 +296,12 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed, bool 
     }
 
     switch (type) {
-    case 4:
     case 8:
         size += variable;
         break;
     case 1:
         if (fixed >= 0xba)
-            size += variable;
+            size += variable + be16(data, offset + 0x38);
         break;
     case 2:
         /* Move/replace actions append their +0x38-sized message text. */
@@ -296,6 +309,7 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed, bool 
             size += variable + be16(data, offset + 0x38);
         break;
     case 3:
+    case 7:
     case 9:
     case 10: {
         size_t length_offset = size + variable;
@@ -306,21 +320,27 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed, bool 
         break;
     }
     case 5: {
-        size_t length_offset = size + variable;
+        /* Alias actions store variable text, a declared message, then a Pascal name. */
+        size_t length_offset = size + variable + be16(data, offset + 0x38);
 
         if (!span(data, offset + length_offset, 1))
             die("truncated action string");
         size = length_offset + 1 + data.p[offset + length_offset];
-        if (padded_type5)
-            size += 2;
         break;
     }
+    case 4:
+        size += variable + be16(data, offset + 0x38);
+        break;
     case 6:
         size += variable + be16(data, offset + 0x2e) + be16(data, offset + 0x32) +
                 be16(data, offset + 0x38);
         break;
     case 13:
         size += variable + secondary;
+        break;
+    case 11:
+    case 12:
+        size += variable;
         break;
     default:
         size += secondary;
@@ -362,7 +382,7 @@ static size_t compact_record_size(Buffer data, size_t offset, bool directory, ui
                 extra += be16(data, offset + 0x2e) + be16(data, offset + 0x32);
             size = record_fixed + names + extra;
         } else {
-            size = variable_file_size(data, offset, record_fixed, false);
+            size = variable_file_size(data, offset, record_fixed);
         }
     }
     if (!span(data, offset, size))
@@ -433,7 +453,7 @@ static Record *parse_catalog_records(Buffer data, size_t offset, size_t expected
             size_t fixed = layout == CATALOG_LITE ? 0x7c :
                            layout == CATALOG_NORMAL ? 0xba : 0xbe;
             record->fixed_size = (uint16_t)fixed;
-            position += variable_file_size(data, position, fixed, revision == 6);
+            position += variable_file_size(data, position, fixed);
         }
 
         if (i + 1 < expected && !semantic_tag(data, position))
@@ -659,14 +679,20 @@ static char *record_relative_path(Record *all, size_t count, size_t index) {
     char *name = record_path_name(all, r);
     size_t cap = strlen(name) + 128;
     char **parts = calloc(count, sizeof(char *));
+    bool *visited = calloc(count, sizeof(bool));
     size_t np = 0;
     uint32_t parent = r->parent;
-    if (!parts)
+    if (!parts || !visited)
         die("out of memory");
     for (size_t guard = 0; guard < count; guard++) {
         Record *d = dir_by_id(all, count, parent);
         if (!d)
             break;
+        size_t directory = (size_t)(d - all);
+
+        if (visited[directory])
+            die("directory parent cycle");
+        visited[directory] = true;
         parts[np++] = record_path_name(all, d);
         parent = d->parent;
     }
@@ -685,6 +711,7 @@ static char *record_relative_path(Record *all, size_t count, size_t index) {
     if (*path)
         strcat(path, "/");
     strcat(path, name);
+    free(visited);
     free(parts);
     free(name);
     return path;

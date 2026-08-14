@@ -158,8 +158,10 @@ bool read_native_resource_fork(const char *path, Buffer *resource) {
 }
 #endif
 
-static bool read_appledouble(const char *path, Buffer *resource) {
+static bool read_appledouble(const char *path, Buffer *resource, bool *container) {
     struct stat st;
+
+    *container = false;
 
     if (stat(path, &st)) {
         if (errno == ENOENT)
@@ -178,6 +180,7 @@ static bool read_appledouble(const char *path, Buffer *resource) {
         free(sidecar.p);
         return false;
     }
+    *container = true;
 
     unsigned count = be16(sidecar, 24);
 
@@ -215,6 +218,9 @@ bool read_sidecar_resource_fork(const char *path, Buffer *resource) {
      *     Installer + ._Installer       unar -k hidden
      *     Installer.data +
      *         Installer.rsrc           macunpack -f (raw forks)
+     *
+     * Some unar modes name an AppleDouble container `Installer.rsrc` rather
+     * than `._Installer`; its magic distinguishes it from a raw fork.
      */
     const char *name = strrchr(path, '/');
     size_t directory = name ? (size_t)(name - path + 1) : 0;
@@ -230,7 +236,8 @@ bool read_sidecar_resource_fork(const char *path, Buffer *resource) {
     memcpy(hidden, path, directory);
     snprintf(hidden + directory, hidden_size - directory, "._%s", name);
 
-    bool found = read_appledouble(hidden, resource);
+    bool appledouble = false;
+    bool found = read_appledouble(hidden, resource, &appledouble);
     free(hidden);
 
     if (found)
@@ -262,7 +269,11 @@ bool read_sidecar_resource_fork(const char *path, Buffer *resource) {
         return false;
     }
 
-    *resource = read_file(raw);
+    found = read_appledouble(raw, resource, &appledouble);
+    if (!found && appledouble)
+        die("AppleDouble sidecar lacks a resource fork");
+    if (!found)
+        *resource = read_file(raw);
     free(raw);
 
     return true;

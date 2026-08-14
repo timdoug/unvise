@@ -739,6 +739,36 @@ int run_installer(const Options *options, const char *input_path) {
                 (record->packed[0] || record->packed[1]))
                 record->external = true;
         }
+        if (options->out && x.payload_data.p == x.data.p && x.catalog_packed) {
+            bool complete = false;
+            bool unavailable = false;
+
+            /*
+             * Active Install stubs carry catalog metadata and folder icons,
+             * while their base-dependent application members point beyond
+             * the local payload. A non-icon local member distinguishes a
+             * conventional updater whose other alternatives remain useful.
+             */
+            for (size_t i = 0; i < x.count; i++) {
+                const Record *record = &x.records[i];
+                size_t packed_size = record->packed[0];
+
+                if (record->packed[1] > SIZE_MAX - packed_size)
+                    die("payload is too large");
+                packed_size += record->packed[1];
+
+                if (record_has_payload(record) &&
+                    (!record->name || strcmp(record->name, "Icon\r")))
+                    complete = true;
+                if (record->base_dependent && !record->external && packed_size &&
+                    (record->payload >= catalog_offset ||
+                     packed_size > catalog_offset - record->payload))
+                    unavailable = true;
+            }
+            if (unavailable && !complete)
+                die("installer uses an external web payload archive; "
+                    "the stub alone cannot be extracted");
+        }
         x.deferred = calloc(x.count, sizeof(*x.deferred));
         if (!x.deferred)
             die("out of memory");

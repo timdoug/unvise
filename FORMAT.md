@@ -184,10 +184,16 @@ bit numbering makes this mask `0x08000000` when the four bytes are read as a
 big-endian integer. The secondary name is read afterward. File records have
 this bit clear. Timestamps use the classic Mac 1904 epoch.
 
-Late action tails additionally use these subtype fields:
+Action tails use these subtype-specific fields:
 
-- normal-layout subtype 2 appends `be16(+0x38)` bytes after its two declared
-  names;
+- subtypes 1, 2, and 4 append `be16(+0x38)` bytes after the common variable
+  string;
+- subtype 5 appends that message followed by a Pascal display name;
+- subtypes 3, 7, 9, and 10 append a Pascal display name after the common
+  variable string;
+- subtypes 11 and 12 append only the common variable string;
+- late subtype 4 may append a Pascal display name;
+- late subtype 5 appends `be16(+0x38)` bytes followed by a Pascal display name;
 - subtype 14 appends `be16(+0x38)` bytes;
 - subtype 15 appends the byte counts at `+0xc1` and `+0xc5`;
 - subtype 17 appends `be16(+0x38)` bytes.
@@ -472,9 +478,8 @@ Processing order:
 - Lite custom-folder-icon destination objects are resolved against the
   immediately preceding directory. Other unresolved Lite destinations are
   rejected.
-- Revision 12 uses `0xa0`-byte `DVCT` bodies; revision 14 uses `0xa4`-byte
-  bodies. Revision 13 is accepted when no `DVCT` occurs; its directory body
-  has not been observed.
+- Revisions 12 and 13 use `0xa0`-byte `DVCT` bodies; revision 14 uses
+  `0xa4`-byte bodies.
 - The complete semantics of every `FVCT` subtype and flag are not known.
   File/action classification and variable action tails follow the format's
   revision-specific structure and require the next record signature at the
