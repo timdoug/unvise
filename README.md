@@ -14,7 +14,7 @@ Compatibility has been verified with freeware, shareware, and demo installers:
 | --- | --- |
 | Lite 3.6 | short catalogs, direct substitution tables |
 | 4.2, 4.5, 4.6.1 | revision-sized compact records, literal or packed initialization, short actions |
-| 5.0.1, 5.5, 5.5.1, 5.5.2 | packed initialization code, shared payloads, file and action records |
+| 5.0.1, 5.5, 5.5.1, 5.5.2 | packed and relocated initialization code, shared payloads, extended action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
 | 6.5 | compressed catalogs |
 | 7.0, 7.0.1, 7.2 | alternate initialization resources, offset-fork and gapped shared payloads |
@@ -24,7 +24,7 @@ Compatibility has been verified with freeware, shareware, and demo installers:
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.
 
-The compatibility corpus contains 88 downloaded fixtures representing 78
+The compatibility corpus contains 89 downloaded fixtures representing 79
 distinct applications. It also exercises early SVCT generations 0 and 2 and
 revision 13, whose exact InstallerVISE marketing versions are not embedded in
 the samples.

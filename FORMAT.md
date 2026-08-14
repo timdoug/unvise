@@ -178,6 +178,8 @@ this bit clear. Timestamps use the classic Mac 1904 epoch.
 
 Late action tails additionally use these subtype fields:
 
+- normal-layout subtype 2 appends `be16(+0x38)` bytes after its two declared
+  names;
 - subtype 14 appends `be16(+0x38)` bytes;
 - subtype 15 appends the byte counts at `+0xc1` and `+0xc5`;
 - subtype 17 appends `be16(+0x38)` bytes.
@@ -328,6 +330,9 @@ at their declared offsets and excludes the prefix.
 - VISE 4.5 uses `CODE` 18 as its word dictionary and places the permutation
   directly in the expanded resource.
 - `CODE` 24 normally supplies its word dictionary.
+- Some VISE 5.5.1 applications place that unpacker and dictionary in
+  uncompressed `CODE` 5002 instead. Its code and four word-table headers match
+  the `CODE` 24 implementation; only the resource ID and table contents differ.
 - VISE 7 uses `CODE` 23 instead.
 - Some VISE 5 and 6 self-installers pack `CODE` 24 and put the required
   dictionary in uncompressed `CODE` 25 or `CODE` 1002.

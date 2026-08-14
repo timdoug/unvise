@@ -291,8 +291,9 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed, bool 
             size += variable;
         break;
     case 2:
+        /* Move/replace actions append their +0x38-sized message text. */
         if (fixed >= 0xba)
-            size += variable;
+            size += variable + be16(data, offset + 0x38);
         break;
     case 3:
     case 9:

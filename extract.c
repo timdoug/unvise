@@ -527,8 +527,19 @@ static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *prese
         return packed;
     }
 
-    if (!resource_find(resource, "CODE", 24, &code) &&
-        !resource_find(resource, "CODE", 23, &code) &&
+    bool found_code = resource_find(resource, "CODE", 24, &code);
+
+    if (!found_code) {
+        Buffer relocated = {0};
+
+        /* VISE 5.5.1 can relocate the identical unpacker to CODE 5002. */
+        if (resource_find(resource, "CODE", 5002, &relocated) &&
+            span(relocated, 0x10, 8) && !memcmp(relocated.p + 0x10, "\xa8\x9fVISE", 6)) {
+            code = relocated;
+            found_code = true;
+        }
+    }
+    if (!found_code && !resource_find(resource, "CODE", 23, &code) &&
         !resource_find(resource, "CODE", 18, &code) &&
         !resource_find(resource, "CODE", 20, &code))
         die("packed DATA 0 lacks its dictionary resource");

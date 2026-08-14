@@ -23,6 +23,7 @@ identifies their exact contents.
 | `vise55.sit` | 5.5 | extracts after `unar` |
 | `vise55-macbinary.bin` | 5.5 | MacBinary; matches `vise55.sit` |
 | `bbedit5.sit` | 5.5.1 | extracts after `unar` |
+| `dos-mounter-98-demo.hqx` | 5.5.1 | relocated initializer dictionary and extended move-action messages |
 | `EV_Installer_1.0.5.bin` | 5.5.2 | MacBinary |
 | `macpipes-227.hqx` | 5.5.2 | decode HQX, then extract with `unar` |
 | `intellinews111.sit` | 5.5.2 | extracts after `unar` |
@@ -87,8 +88,8 @@ late action records; and late base-dependent updates.
 
 ## Coverage
 
-- 88 downloaded fixtures represent 78 distinct InstallerVISE applications.
-- 70 distinct applications contain complete local payloads and extract
+- 89 downloaded fixtures represent 79 distinct InstallerVISE applications.
+- 71 distinct applications contain complete local payloads and extract
   successfully.
 - Four distinct applications are Active Install stubs. Five outer fixtures
   represent them because the two VISE 6 wrappers contain the same
@@ -127,6 +128,8 @@ late action records; and late base-dependent updates.
   `https://www.sonnettech.com/downloads/software/c7200_install_v11.hqx`.
 - `default-folder-312.hqx` is St. Clair Software's Default Folder 3.1.2 from
   `https://ftp.lip6.fr/pub/mac/info-mac/gui/default-folder-312.hqx`.
+- `dos-mounter-98-demo.hqx` is Software Architects' DOS Mounter 98 demo from
+  `https://ftp.lip6.fr/pub/mac/info-mac/app/dos-mounter-98-demo.hqx`.
 - `install_aol_5.0.hqx` is America Online 5.0 from the preserved PPCMLA
   downloads directory at `https://ppcmla.org/downloads/`.
 - `AIM_4.3.hqx` is AOL Instant Messenger 4.3 from the same preserved PPCMLA
