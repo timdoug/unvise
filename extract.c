@@ -20,11 +20,11 @@ typedef enum {
     PAYLOAD_SEPARATE_FORKS,
     PAYLOAD_SHARED_MEMBER,
     PAYLOAD_OFFSET_MEMBER,
-    PAYLOAD_VISE8_MEMBER
+    PAYLOAD_FRAMED_MEMBER
 } PayloadLayout;
 
 static bool record_has_payload(const Record *record) {
-    return !strcmp(record->tag, "FVCT") && record->file &&
+    return !strcmp(record->tag, "FVCT") && record->file && !record->base_dependent &&
            (record->expanded[0] || record->expanded[1]) &&
            (record->packed[0] || record->packed[1]);
 }
@@ -47,6 +47,9 @@ static void print_record(const Record *record, size_t index, bool raw_names) {
                record->packed[0], record->expanded[0], record->packed[1], record->expanded[1]);
     else if (!strcmp(record->tag, "FVCT"))
         fputs(" action", stdout);
+
+    if (record->base_dependent)
+        fputs(" base-dependent", stdout);
 
     if (record->name) {
         fputs(" name=", stdout);
@@ -221,16 +224,18 @@ static size_t shared_packed_size(const Extraction *x, const Record *record,
     bool has_data = false;
 
     for (size_t i = 0; i < x->count; i++)
-        if (same_payload(&x->records[i], record->payload) && x->records[i].expanded[0])
-            has_data = true;
+        if (same_payload(&x->records[i], record->payload)) {
+            if (x->records[i].expanded[0])
+                has_data = true;
+        }
 
     /*
      * A shared group containing data forks uses field 0 as its packed size;
      * field 1 is the complete expanded member size. A resource-only group
      * instead uses field 1 as its packed size and the declared fork sizes give
-     * the expanded size. VISE 8 always uses the first form.
+     * the expanded size. Late data-bearing layouts use the first form.
      */
-    if (catalog_has_vise8_payloads(x->layout)) {
+    if (catalog_has_late_payloads(x->layout) && has_data) {
         *expanded_size = record->packed[1];
         if (record->packed[0] && *expanded_size)
             return record->packed[0];
@@ -246,6 +251,55 @@ static size_t shared_packed_size(const Extraction *x, const Record *record,
             "(0x%X, 0x%X, expanded 0x%zx)\n",
             record->payload, record->packed[0], record->packed[1], *expanded_size);
     exit(1);
+}
+
+static void extract_shared_resource_endpoint(const Extraction *x, uint32_t payload) {
+    size_t packed_size = 0;
+    size_t expanded_size = 0;
+    size_t endpoint = SIZE_MAX;
+
+    for (size_t i = 0; i < x->count; i++)
+        if (same_payload(&x->records[i], payload)) {
+            const Record *record = &x->records[i];
+
+            if (record->expanded[0] || record->packed[0] || !record->expanded[1] ||
+                !record->packed[1])
+                die("invalid resource-only shared payload");
+            if (record->packed[1] > packed_size)
+                packed_size = record->packed[1];
+            if (record->expanded[1] > expanded_size)
+                expanded_size = record->expanded[1];
+            if (record->packed[1] == packed_size)
+                endpoint = i;
+        }
+
+    if (endpoint == SIZE_MAX || x->records[endpoint].subtype == 6)
+        die("invalid resource-only shared payload endpoint");
+    for (size_t i = 0; i < x->count; i++)
+        if (same_payload(&x->records[i], payload) && i != endpoint &&
+            x->records[i].subtype != 6)
+            die("unknown resource-only shared payload layout");
+
+    check_payload(x, payload, packed_size);
+    Buffer expanded =
+        inflate_member(slice(x->data, payload, packed_size), x->table, expanded_size);
+
+    for (size_t i = 0; i < x->count; i++)
+        if (same_payload(&x->records[i], payload)) {
+            const Record *record = &x->records[i];
+
+            /*
+             * Shorter endpoints are installer-private update references into
+             * the following complete resource member. They do not terminate
+             * a DEFLATE stream and their +0x54 field is not a fork CRC.
+             */
+            if (i == endpoint) {
+                check_fork_crc(record, NULL, expanded.p);
+                emit_fork(x, i, 1, expanded.p, record->expanded[1]);
+            }
+        }
+
+    free(expanded.p);
 }
 
 static PayloadLayout payload_layout(const Extraction *x, const Record *record,
@@ -265,9 +319,9 @@ static PayloadLayout payload_layout(const Extraction *x, const Record *record,
     if (shared_count > 1)
         return PAYLOAD_SHARED_MEMBER;
 
-    if (catalog_has_vise8_payloads(x->layout) && record->packed[0] &&
+    if (catalog_has_late_payloads(x->layout) && record->packed[0] &&
         record->packed[1] && record->expanded[0] && !record->expanded[1])
-        return PAYLOAD_VISE8_MEMBER;
+        return PAYLOAD_FRAMED_MEMBER;
 
     if (record->has_fork_offsets && record->packed[0] && member_end &&
         record->packed[1] >= member_end)
@@ -310,12 +364,18 @@ static void distribute_shared(const Extraction *x, uint32_t payload, Buffer expa
                     emit_fork(x, i, fork, forks[fork], record->expanded[fork]);
         }
 
-    if (covered_end != expanded.n && !uses_offsets && !catalog_has_vise8_payloads(x->layout))
+    if (covered_end != expanded.n && !uses_offsets && !catalog_has_late_payloads(x->layout))
         die("unassigned bytes in shared payload");
 }
 
 static void extract_shared(const Extraction *x, size_t index) {
     const Record *record = &x->records[index];
+
+    if (catalog_has_late_payloads(x->layout) && !record->expanded[0] && !record->packed[0]) {
+        extract_shared_resource_endpoint(x, record->payload);
+        return;
+    }
+
     size_t expanded_size = shared_expanded_size(x, record->payload);
     size_t packed_size = shared_packed_size(x, record, &expanded_size);
 
@@ -328,14 +388,14 @@ static void extract_shared(const Extraction *x, size_t index) {
     free(expanded.p);
 }
 
-static void extract_vise8_framed(const Extraction *x, size_t index) {
+static void extract_framed(const Extraction *x, size_t index) {
     const Record *record = &x->records[index];
     Buffer expanded = inflate_member(slice(x->data, record->payload, record->packed[0]), x->table,
                                      record->packed[1]);
 
     if (record->fork_offset[0] > expanded.n ||
         record->expanded[0] > expanded.n - record->fork_offset[0])
-        die("VISE 8 framed payload is shorter than its data fork");
+        die("framed payload is shorter than its data fork");
 
     check_fork_crc(record, expanded.p + record->fork_offset[0], NULL);
     emit_fork(x, index, 0, expanded.p + record->fork_offset[0], record->expanded[0]);
@@ -388,8 +448,8 @@ static void extract_records(const Extraction *x) {
         size_t shared_count = shared_records(x, record->payload, &first);
         PayloadLayout layout = payload_layout(x, record, shared_count);
 
-        if (layout == PAYLOAD_VISE8_MEMBER) {
-            extract_vise8_framed(x, i);
+        if (layout == PAYLOAD_FRAMED_MEMBER) {
+            extract_framed(x, i);
         } else if (layout == PAYLOAD_OFFSET_MEMBER) {
             extract_offset_forks(x, i);
         } else if (layout == PAYLOAD_SHARED_MEMBER) {

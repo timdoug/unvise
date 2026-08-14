@@ -17,9 +17,9 @@ Compatibility has been verified with freeware, shareware, and demo installers:
 | 5.0.1, 5.5, 5.5.1, 5.5.2 | packed initialization code, shared payloads, file and action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
 | 6.5 | compressed catalogs |
-| 7.0, 7.0.1, 7.2, 7.4 | alternate initialization resources, offset-fork and gapped shared payloads |
-| 7.3 | PEF-embedded substitution table with ordinary compressed catalog records |
-| 8.0.2, 8.5 | later compressed catalogs, PEF tables, framed payloads, mixed stored/compressed blocks |
+| 7.0, 7.0.1, 7.2 | alternate initialization resources, offset-fork and gapped shared payloads |
+| 7.3 | PEF-embedded substitution table, word-oriented members, base-dependent updates |
+| 7.4, 8.0.2, 8.5 | later compressed catalogs, framed and overlapping update payloads, mixed stored/compressed blocks |
 
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.

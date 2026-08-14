@@ -43,6 +43,8 @@ identifies their exact contents.
 | `TclTk_8.3.3_FullInstall.bin` | 7.2 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.3_WebInstall.bin` | 7.2 Active Install | reports missing external payload |
 | `ljlegacy-en.sit` | 7.3 | extracts after `unar` |
+| `c7200_install_v11.hqx` | 7.3 | extracts complete files; recognizes paired base-dependent updates |
+| `ce_install_v231.hqx` | 7.4 | decode HQX, then extract with `unar` |
 | `TclTk_8.3.4_FullInstall.bin` | 7.4 | MacBinary; extracts after removing MacBinary |
 | `MacPython223full.bin` | 8.0.2 | extracts after removing MacBinary |
 | `MacPython223full.hqx` | 8.0.2 | matches `MacPython223full.bin` after decoding |
@@ -56,9 +58,9 @@ identifies their exact contents.
 
 ## Coverage
 
-- 45 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
+- 47 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
   through 8.5.
-- 40 contain complete local payloads and extract successfully.
+- 42 contain complete local payloads and extract successfully.
 - Five are Active Install fixtures. The two VISE 6 wrappers contain the same
   stub; the VISE 7.0.1, 7.2, and 8.0.2 stubs are independent. All five report
   the unsupported external payload rather than producing a partial extraction.
@@ -67,7 +69,7 @@ identifies their exact contents.
 
 ## Outer archives
 
-- `unar` unwraps 44 fixtures completely. Its MacBinary reader fails on the
+- `unar` unwraps 46 fixtures completely. Its MacBinary reader fails on the
   18 MB Tcl/Tk 8.3.4 file; splitting that file's forks directly produces a
   valid installer.
 - Nested HQX/StuffIt fixtures require separate extraction of the HQX and
@@ -84,3 +86,7 @@ identifies their exact contents.
   `https://sourceforge.net/projects/tcl/files/Tcl/`.
 - `ljlegacy-en.sit` is HP's public legacy LaserJet installer from
   `https://ftp.hp.com/pub/softlib/software4/lj606/lj-29264-1/ljlegacy-en.sit`.
+- `ce_install_v231.hqx` is Sonnet's Crescendo/Encore 2.3.1 installer from
+  `https://www.sonnettech.com/downloads/software/ce_install_v231.hqx`.
+- `c7200_install_v11.hqx` is Sonnet's Crescendo 7200 1.1 installer from
+  `https://www.sonnettech.com/downloads/software/c7200_install_v11.hqx`.

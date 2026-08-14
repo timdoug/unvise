@@ -30,10 +30,12 @@ typedef struct {
     size_t output_group;
     char tag[5];
     char *name, *path;
-    bool file, has_fork_offsets;
+    bool file, has_fork_offsets, base_dependent;
     uint32_t parent, dir_id, payload, checksum, created, modified;
     uint32_t record_flags;
+    uint32_t payload_mode;
     uint16_t depth, fixed_size;
+    uint8_t subtype;
     uint32_t packed[2], expanded[2];
     uint32_t fork_offset[2];
     uint8_t finder_info[16];
@@ -50,7 +52,7 @@ typedef enum {
     CATALOG_COMPACT,
     CATALOG_NORMAL,
     CATALOG_COMPRESSED,
-    CATALOG_VISE8,
+    CATALOG_LATE,
 } CatalogLayout;
 
 void die(const char *message);
@@ -82,7 +84,7 @@ Buffer inflate_member(Buffer packed, const uint8_t table[256], size_t expected);
 Buffer inflate_catalog(Buffer data, size_t catalog_offset);
 
 bool catalog_is_packed(CatalogLayout layout);
-bool catalog_has_vise8_payloads(CatalogLayout layout);
+bool catalog_has_late_payloads(CatalogLayout layout);
 CatalogLayout catalog_compressed_layout(uint8_t revision);
 CatalogLayout catalog_uncompressed_layout(uint8_t revision);
 Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,

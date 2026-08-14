@@ -1,11 +1,11 @@
 #include "unvise.h"
 
 bool catalog_is_packed(CatalogLayout layout) {
-    return layout == CATALOG_COMPRESSED || layout == CATALOG_VISE8;
+    return layout == CATALOG_COMPRESSED || layout == CATALOG_LATE;
 }
 
-bool catalog_has_vise8_payloads(CatalogLayout layout) {
-    return layout == CATALOG_VISE8;
+bool catalog_has_late_payloads(CatalogLayout layout) {
+    return layout == CATALOG_LATE;
 }
 
 static void utf8_add(char **q, uint32_t c) {
@@ -124,18 +124,18 @@ CatalogLayout catalog_compressed_layout(uint8_t revision) {
     /*
      * The Carbon loaders are separate implementations, but retain the common
      * SVCT revision sequence. The VISE 7.3 PPC loader (revision 11) reads the
-     * ordinary 0x94/0xba fixed bodies. VISE 8 starts at revision 12 and reads
-     * its later structures; VISE 8.5 uses revision 14.
+     * ordinary 0x94/0xba fixed bodies. The later structures start at revision
+     * 12 in VISE 7.4; VISE 8.5 uses revision 14.
      */
     if (revision >= 12)
-        return CATALOG_VISE8;
+        return CATALOG_LATE;
     if (revision >= 5)
         return CATALOG_COMPRESSED;
     die("unsupported compressed catalog revision");
     return CATALOG_COMPRESSED;
 }
 
-static bool vise8_next_tag(Buffer data, size_t offset, bool last) {
+static bool late_next_tag(Buffer data, size_t offset, bool last) {
     if (!span(data, offset, 4))
         return false;
     if (last)
@@ -143,11 +143,11 @@ static bool vise8_next_tag(Buffer data, size_t offset, bool last) {
     return !memcmp(data.p + offset, "DVCT", 4) || !memcmp(data.p + offset, "FVCT", 4);
 }
 
-static size_t vise8_file_size(Buffer data, size_t offset) {
+static size_t late_file_size(Buffer data, size_t offset) {
     const size_t fixed = 0xc6;
 
     if (!span(data, offset, fixed))
-        die("truncated VISE 8 FVCT record");
+        die("truncated late FVCT record");
 
     size_t primary = data.p[offset + 0x7a];
     size_t variable = data.p[offset + 0x7b];
@@ -177,7 +177,7 @@ static size_t vise8_file_size(Buffer data, size_t offset) {
         size_t length_offset = size;
 
         if (!span(data, offset + length_offset, 1))
-            die("truncated VISE 8 action string");
+            die("truncated late action string");
         size = length_offset + 1 + data.p[offset + length_offset];
         break;
     }
@@ -192,11 +192,11 @@ static size_t vise8_file_size(Buffer data, size_t offset) {
     size += secondary;
 
     if (!span(data, offset, size))
-        die("truncated VISE 8 FVCT variable fields");
+        die("truncated late FVCT variable fields");
     return size;
 }
 
-static uint16_t vise8_directory_fixed(uint8_t revision) {
+static uint16_t late_directory_fixed(uint8_t revision) {
     /*
      * Both recovered VISE 8.0.2 PPC loaders read 0xa0 bytes; both recovered
      * VISE 8.5 loaders read 0xa4. No revision-13 installer is available, so
@@ -207,28 +207,28 @@ static uint16_t vise8_directory_fixed(uint8_t revision) {
         return 0xa0;
     if (revision == 14)
         return 0xa4;
-    die("unsupported VISE 8 catalog revision");
+    die("unsupported late catalog revision");
     return 0;
 }
 
-static size_t vise8_directory_size(Buffer data, size_t offset, uint16_t fixed) {
+static size_t late_directory_size(Buffer data, size_t offset, uint16_t fixed) {
     if (!span(data, offset, fixed))
-        die("truncated VISE 8 DVCT record");
+        die("truncated late DVCT record");
 
     size_t names = (size_t)data.p[offset + 0x4f] + data.p[offset + 0x50];
     return fixed + names;
 }
 
-static Record *parse_vise8_catalog(Buffer data, size_t expected, uint8_t revision, size_t *count) {
+static Record *parse_late_catalog(Buffer data, size_t expected, uint8_t revision, size_t *count) {
     Record *records = calloc(expected + 1, sizeof(*records));
     size_t offset = 0;
-    uint16_t directory_fixed = vise8_directory_fixed(revision);
+    uint16_t directory_fixed = late_directory_fixed(revision);
 
     if (!records)
         die("out of memory");
     for (size_t i = 0; i < expected; i++) {
         if (!span(data, offset, 4))
-            die("truncated VISE 8 catalog");
+            die("truncated late catalog");
 
         Record *record = &records[i];
         record->off = offset;
@@ -238,15 +238,15 @@ static Record *parse_vise8_catalog(Buffer data, size_t expected, uint8_t revisio
         bool last = i + 1 == expected;
         if (!strcmp(record->tag, "FVCT")) {
             record->fixed_size = 0xc6;
-            offset += vise8_file_size(data, offset);
+            offset += late_file_size(data, offset);
         } else if (!strcmp(record->tag, "DVCT")) {
             record->fixed_size = directory_fixed;
-            offset += vise8_directory_size(data, offset, directory_fixed);
+            offset += late_directory_size(data, offset, directory_fixed);
         } else
-            die("invalid VISE 8 catalog record signature");
+            die("invalid late catalog record signature");
 
-        if (!vise8_next_tag(data, offset, last))
-            die("invalid VISE 8 catalog record length");
+        if (!late_next_tag(data, offset, last))
+            die("invalid late catalog record length");
     }
 
     records[expected].off = offset;
@@ -428,6 +428,9 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
     record->expanded[1] = be32(data, record->off + 0x50);
     record->checksum = be32(data, record->off + 0x54);
     record->payload = be32(data, record->off + 0x64);
+    record->payload_mode = be32(data, record->off + 0x60);
+    if (record->end - record->off > 0x75)
+        record->subtype = data.p[record->off + 0x75];
     /*
      * The VISE 4.5 68K and VISE 8.5 PPC loaders independently copy raw
      * +0x3c/+0x40 to internal +0x42/+0x46.  Their file-info paths use those
@@ -452,7 +455,7 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
         record->fork_offset[0] = be32(data, record->off + 0x68);
         record->fork_offset[1] = be32(data, record->off + 0x6c);
     }
-    if (layout == CATALOG_VISE8) {
+    if (layout == CATALOG_LATE) {
         record->depth = be16(data, record->off + 0x60);
     }
 }
@@ -477,13 +480,35 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
                    sizeof(record->finder_info));
             record->created = be32(data, record->off + 0x14);
             record->modified = be32(data, record->off + 0x18);
-            if (layout == CATALOG_VISE8)
+            if (layout == CATALOG_LATE)
                 record->depth = be16(data, record->off + 0x48);
         } else if (!strcmp(record->tag, "FVCT"))
             decode_file_record(data, record, layout);
     }
 
-    if (layout == CATALOG_VISE8) {
+    if (layout == CATALOG_COMPRESSED)
+        for (size_t i = 0; i < count; i++) {
+            Record *record = &records[i];
+
+            if (!record->file || record->subtype != 2 || record->payload_mode || !record->name ||
+                record->expanded[0])
+                continue;
+            for (size_t j = 0; j < count; j++) {
+                const Record *base = &records[j];
+
+                if (base->file && base->subtype == record->subtype && base->payload_mode &&
+                    base->name && !strcmp(base->name, record->name) &&
+                    base->parent == record->parent &&
+                    !memcmp(base->finder_info, record->finder_info, sizeof(record->finder_info)) &&
+                    base->expanded[0] == record->expanded[0] &&
+                    base->expanded[1] == record->expanded[1]) {
+                    record->base_dependent = true;
+                    break;
+                }
+            }
+        }
+
+    if (layout == CATALOG_LATE) {
         /*
          * The VISE 8 PPC loaders read the nesting level from +0x48 in DVCT
          * and +0x60 in FVCT. Records are stored in preorder. VISE 8.5 uses
@@ -500,7 +525,7 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
             if (strcmp(record->tag, "DVCT") && strcmp(record->tag, "FVCT"))
                 continue;
             if (record->depth > count || (record->depth && !parents[record->depth - 1]))
-                die("invalid VISE 8 catalog depth");
+                die("invalid late catalog depth");
             record->parent = record->depth ? parents[record->depth - 1] : 0;
             if (!strcmp(record->tag, "DVCT")) {
                 record->dir_id = (uint32_t)i + 1;
@@ -689,7 +714,7 @@ static void plan_output_paths(Record *all, size_t count) {
 
 Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,
                 uint8_t revision, size_t *count) {
-    Record *records = layout == CATALOG_VISE8 ? parse_vise8_catalog(data, expected, revision, count) :
+    Record *records = layout == CATALOG_LATE ? parse_late_catalog(data, expected, revision, count) :
                                                parse_catalog_records(data, offset, expected, layout,
                                                                      revision, count);
 

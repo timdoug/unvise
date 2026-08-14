@@ -69,7 +69,7 @@ field; it does not inspect catalog contents for a likely structure:
 | Compact | revisions 2, 3, or 4, uncompressed | 4.2, 4.5, 4.6.1 |
 | Normal | revisions 5 through 11, uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
 | Compressed | revisions 5 through 11, word-swapped raw DEFLATE | 6.5, 7.0, 7.3 |
-| VISE 8 | revisions 12 or 14, compressed with later bodies | 8.0.2, 8.5 |
+| Late | revisions 12 or 14, compressed with later bodies | 7.4, 8.0.2, 8.5 |
 
 Revision 1 and revision 13 are unsupported and rejected. VISE 5.0.1 uses a
 normal uncompressed catalog even when it contains a `PACK` record.
@@ -89,16 +89,16 @@ normal uncompressed catalog even when it contains a `PACK` record.
 | `+0x50` | 1 | primary trailing-name length |
 | `+0x94` | variable | MacRoman name |
 
-For a compressed catalog, the name moves to `+0x98`; VISE 8 records use
-`+0xa0` or `+0xa4`.
+For a compressed catalog, the name moves to `+0x98`; late records use `+0xa0`
+or `+0xa4`.
 
-VISE 8 stores records in preorder and gives each directory an explicit nesting
-depth in the high 16 bits at `+0x48`. Directory IDs remain at `+0x1c`, but the
-preorder depth is sufficient to reconstruct the tree.
+The late layout stores records in preorder and gives each directory an explicit
+nesting depth in the high 16 bits at `+0x48`. Directory IDs remain at `+0x1c`,
+but the preorder depth is sufficient to reconstruct the tree.
 
-The VISE 8.0.2 directory body is `0xa0` bytes and the VISE 8.5 body is `0xa4`
-bytes. The primary and optional secondary trailing-name lengths are bytes at
-`+0x50` and `+0x4f` respectively.
+Revision 12 uses a `0xa0`-byte directory body; revision 14 uses `0xa4`. The
+primary and optional secondary trailing-name lengths are bytes at `+0x50` and
+`+0x4f` respectively.
 
 Directory `+0x04..+0x13` contains Finder information; `+0x14` and `+0x18`
 contain creation and modification times. Directory metadata is applied after
@@ -137,23 +137,24 @@ restored parent mtime.
 | `+0x48` | 4 | expanded data-fork size |
 | `+0x4c` | 4 | packed resource-fork size |
 | `+0x50` | 4 | expanded resource-fork size |
-| `+0x54` | 4 | CRC-32 of expanded data fork followed by resource fork |
+| `+0x54` | 4 | CRC-32 of expanded forks for a self-contained file |
 | `+0x58` | 4 | parent directory ID or install-location token |
+| `+0x60` | 4 | payload mode in the ordinary compressed layout |
 | `+0x64` | 4 | payload offset in the data fork |
 | `+0x68` | 4 | data-fork offset in a shared or combined expanded member |
 | `+0x6c` | 4 | resource-fork offset in that member |
 | `+0x7a` | 1 | primary trailing-name length |
 | `+0xba` | variable | MacRoman name |
 
-For a compressed catalog, the name moves to `+0xbe`; VISE 8 moves it eight
-bytes farther to `+0xc6`. The fork and payload fields do not move.
+For a compressed catalog, the name moves to `+0xbe`; the late layout moves it
+eight bytes farther to `+0xc6`. The fork and payload fields do not move.
 
-In VISE 8, the high 16 bits at `+0x60` are the preorder nesting depth. VISE
-8.5 repurposes `+0x58`; it must not be interpreted as a parent ID. Hierarchy is
-reconstructed from the explicit depth fields.
+In the late layout, the high 16 bits at `+0x60` are the preorder nesting depth.
+VISE 8.5 repurposes `+0x58`; it must not be interpreted as a parent ID.
+Hierarchy is reconstructed from the explicit depth fields.
 
 The primary trailing-name length is consistently the byte at `+0x7a`. The
-VISE 8 fixed file/action body is `0xc6` bytes and can carry an optional
+late fixed file/action body is `0xc6` bytes and can carry an optional
 secondary-name length at `+0xb9`. Classic bit 4 at `+0x0c` identifies an
 action and controls whether the byte
 at `+0x7b` and subtype-specific action fields follow the primary name. Classic
@@ -210,7 +211,7 @@ Several `FVCT` records may reference one compressed member:
   offsets can leave installer-private gaps in that expansion.
 - A resource-only group stores its compressed member size in packed field 1;
   its declared resource-fork sizes determine the expanded size.
-- VISE 8 consistently uses the first form, including data-only members.
+- Late data-bearing groups use the first form, including data-only members.
 
 ### Conditional path collisions
 
@@ -223,19 +224,39 @@ Several `FVCT` records may reference one compressed member:
   record retains the logical pathname. Later distinct records receive a
   `~NNNN` suffix, where `NNNN` is the stable catalog record number. Data and
   resource forks from one record retain the same suffix.
-### VISE 8 framed payloads
+
+### Late framed and overlapping payloads
 
 - Shared payload field 0 holds the compressed member size.
 - Shared payload field 1 holds the complete expanded size.
 - The common fork-offset fields are authoritative; catalog order is not used
-  to divide VISE 8 members.
+  to divide framed members.
 - Bytes not covered by a catalog record are not output.
 - A single data-only record can use the same framing and offset fields.
+- A subtype-6 resource-update record can share the following complete member's
+  payload offset while giving an earlier packed endpoint. The shorter endpoint
+  does not terminate a DEFLATE stream, and its `+0x54` field is not a fork CRC.
+  It is installer policy rather than a self-contained file and is not emitted.
+
+### Base-dependent update members
+
+Some VISE 7.3 resource records occur in same-name pairs with identical expanded
+sizes and Finder information:
+
+- A self-contained record has subtype 2, a nonzero payload mode at `+0x60`,
+  compressed bytes, and a CRC-32 at `+0x54`.
+- Its alternative has subtype 2, payload mode zero, and a small selector at
+  `+0x54` rather than a CRC-32.
+- The alternative is a DEFLATE-family update stream whose 64 KiB history is
+  initialized from an existing installed resource fork. It is not independently
+  extractable and is listed as `base-dependent` rather than emitted.
+- The installer can therefore update a matching installed file cheaply or use
+  the paired self-contained member for a fresh installation.
 
 ### File checksums
 
-- `FVCT+0x54` is the CRC-32 of the expanded data fork followed by the expanded
-  resource fork.
+- For self-contained files, `FVCT+0x54` is the CRC-32 of the expanded data fork
+  followed by the expanded resource fork.
 - The checksum excludes compression framing, shared-member gaps, and
   installer-private bytes outside the declared fork ranges.
 - `unvise` verifies it before accepting an extracted file.
@@ -310,7 +331,12 @@ The initializer command byte is decoded exhaustively:
 - Catalog records retain the ordinary compressed-layout name offsets
   (`DVCT+0x98` and `FVCT+0xbe`).
 - Catalog records have fixed `0x94`-byte `DVCT` and `0xba`-byte `FVCT` bodies.
-  The low SVCT revision byte is 11; VISE 8 starts at revision 12.
+  The low SVCT revision byte is 11; the late layout starts at revision 12.
+- `Dcmp` 1005 implements DEFLATE with a 64 KiB circular history buffer. Its
+  stored-block reader accepts transformed input as big-endian 16-bit words;
+  one host path reverses the two bytes in each word before decoding.
+- The same decoder can begin with caller-supplied history, which implements the
+  base-dependent resource updates described above.
 
 ### VISE 8.0.2
 
@@ -400,13 +426,13 @@ Processing order:
 - Password handling uses a conventional ZipCrypto path, but is not
   implemented.
 - Carbon catalog layout follows the low SVCT revision byte: VISE 7.3 uses the
-  ordinary layout at revision 11, VISE 8 begins at revision 12, and VISE 8.5
-  uses revision 14.
+  ordinary layout at revision 11, the late layout begins at revision 12 in
+  VISE 7.4, and VISE 8.5 uses revision 14.
 - Lite custom-folder-icon destination objects are resolved against the
   immediately preceding directory. Other unresolved Lite destinations are
   rejected.
-- VISE 8.0.2 uses `0xa0`-byte `DVCT` bodies at revision 12. VISE 8.5 uses
-  `0xa4`-byte bodies at revision 14. Revision 13 is unsupported and rejected.
+- Revision 12 uses `0xa0`-byte `DVCT` bodies; revision 14 uses `0xa4`-byte
+  bodies. Revision 13 is unsupported and rejected.
 - The complete semantics of every `FVCT` subtype and flag are not known.
   File/action classification and variable action tails follow the format's
   revision-specific structure and require the next record signature at the
@@ -420,5 +446,8 @@ Processing order:
   bytes. Their nominal payload offsets do not identify stored members and the
   field at `+0x54` is not a fork CRC. They are installer-internal references,
   not extractable byte streams, and are listed but not emitted.
+- VISE 7.3 base-dependent update members require the previous installed
+  resource fork as decoder history. Their paired self-contained files are
+  extracted; the update members are recognized, listed, and not emitted.
 - Active Install catalogs can refer to an external archive. Its container and
   retrieval protocol are unsupported.

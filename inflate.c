@@ -269,6 +269,29 @@ Buffer inflate_member(Buffer packed, const uint8_t table[256], size_t expected) 
     for (size_t i = 0; i < packed.n; i++)
         x[i] = table[packed.p[i]];
 
+    if (packed.n >= 2) {
+        unsigned word = ((unsigned)x[0] << 8) | x[1];
+
+        /*
+         * The VISE 7.3 Dcmp 1005 decoder consumes host-supplied 16-bit words.
+         * One host path presents those words in byte-reversed order. A stored
+         * block makes the representation self-identifying because LEN and
+         * NLEN cease to be complements until each word is swapped.
+         */
+        if (((word >> 1) & 3) == 0 && packed.n >= 6) {
+            unsigned length = ((unsigned)x[2] << 8) | x[3];
+            unsigned inverse = ((unsigned)x[4] << 8) | x[5];
+
+            if (length != ((~inverse) & 0xffffu))
+                for (size_t i = 0; i + 1 < packed.n; i += 2) {
+                    uint8_t byte = x[i];
+
+                    x[i] = x[i + 1];
+                    x[i + 1] = byte;
+                }
+        }
+    }
+
     Buffer deflate = standardize_deflate((Buffer){x, packed.n});
 
     if (deflate.n > UINT_MAX || expected >= UINT_MAX)
