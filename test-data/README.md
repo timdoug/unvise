@@ -12,6 +12,7 @@ identifies their exact contents.
 | `icondropper30.sit` | Lite 3.6 | extracts after `unar` |
 | `barbabatch31.sit` | Lite 3.6 | extracts after `unar` |
 | `utc-display.sit` | Lite 3.6 | extracts after `unar` |
+| `surfjet-demo-installer-10.hqx` | Lite 3.6 | deep hierarchy and large shared payload groups |
 | `ie30a-java.sit` | 4.2 | extracts after `unar` |
 | `oms232-web.sit` | 4.2 | extracts after `unar` |
 | `PGP50Freeware.hqx` | 4.5 | extracts after decoding HQX |
@@ -37,6 +38,7 @@ identifies their exact contents.
 | `vise65-macbinary.bin` | 6.5 | MacBinary; matches `vise65.sit` |
 | `icontrol12.sit` | 6.5 | extracts after `unar` |
 | `install_aol_5.0.hqx` | 6.5 | action-heavy catalog with shared payload groups |
+| `super-lock-pro-451.hqx` | 6.5 | action-heavy catalog with an unpaired base-dependent update |
 | `interarchy40.sit` | 7.0 | extracts after `unar` |
 | `interarchy38.sit` | 7.0 | extracts after `unar` |
 | `TclTk_8.3.2p1_RuntimeInstall.bin` | 7.0.1 | MacBinary; extracts after `unar` |
@@ -88,9 +90,12 @@ late action records; and late base-dependent updates.
 
 ## Coverage
 
-- 89 downloaded fixtures represent 79 distinct InstallerVISE applications.
-- 71 distinct applications contain complete local payloads and extract
+- 91 downloaded fixtures represent 81 distinct InstallerVISE applications.
+- 72 distinct applications contain complete local payloads and extract
   successfully.
+- One application contains self-contained files plus an unpaired base-dependent
+  update. Its files extract successfully and the unavailable update is listed
+  without being decoded against the wrong history.
 - Four distinct applications are Active Install stubs. Five outer fixtures
   represent them because the two VISE 6 wrappers contain the same
   stub; the VISE 7.0.1, 7.2, and 8.0.2 stubs are independent. All five report
@@ -128,6 +133,10 @@ late action records; and late base-dependent updates.
   `https://www.sonnettech.com/downloads/software/c7200_install_v11.hqx`.
 - `default-folder-312.hqx` is St. Clair Software's Default Folder 3.1.2 from
   `https://ftp.lip6.fr/pub/mac/info-mac/gui/default-folder-312.hqx`.
+- `super-lock-pro-451.hqx` is TriVectus' SuperLock Pro 4.5.1 from
+  `https://ftp.lip6.fr/pub/mac/info-mac/disk/super-lock-pro-451.hqx`.
+- `surfjet-demo-installer-10.hqx` is the SurfJet Agent 1.0 demo from
+  `https://ftp.lip6.fr/pub/mac/info-mac/inet/surfjet-demo-installer-10.hqx`.
 - `dos-mounter-98-demo.hqx` is Software Architects' DOS Mounter 98 demo from
   `https://ftp.lip6.fr/pub/mac/info-mac/app/dos-mounter-98-demo.hqx`.
 - `install_aol_5.0.hqx` is America Online 5.0 from the preserved PPCMLA

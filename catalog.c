@@ -554,25 +554,12 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
 
             /*
              * The low payload-mode bit selects a complete member. With the
-             * bit clear, an otherwise matching record is an updater whose
-             * decoder history comes from the installed file. Higher bits
-             * vary between the classic and Carbon loaders.
+             * bit clear, the record is an updater whose decoder history comes
+             * from the installed file; a complete alternative need not be in
+             * the catalog. Higher bits vary between loader builds.
              */
-            if (!record->file || (record->payload_mode & 1) || !record->name)
-                continue;
-            for (size_t j = 0; j < count; j++) {
-                const Record *base = &records[j];
-
-                if (base->file && (base->payload_mode & 1) && base->name &&
-                    !strcmp(base->name, record->name) &&
-                    base->parent == record->parent &&
-                    !memcmp(base->finder_info, record->finder_info, sizeof(record->finder_info)) &&
-                    base->expanded[0] == record->expanded[0] &&
-                    base->expanded[1] == record->expanded[1]) {
-                    record->base_dependent = true;
-                    break;
-                }
-            }
+            if (record->file && !(record->payload_mode & 1))
+                record->base_dependent = true;
         }
 }
 

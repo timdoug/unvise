@@ -269,12 +269,13 @@ Several `FVCT` records may reference one compressed member:
 
 ### Base-dependent update members
 
-Some wide and late catalogs contain same-name records with identical expanded
-sizes, Finder information, and reconstructed parents:
+Some wide and late catalogs contain update records that depend on an existing
+installed file. They may be paired with a same-name complete record, but that
+base need not be present in the installer:
 
 - A self-contained record has the low payload-mode bit set at `+0x60`,
   compressed bytes, and a CRC-32 at `+0x54`.
-- Its alternative has the low payload-mode bit clear and a small selector at
+- A base-dependent update has the low payload-mode bit clear and a small selector at
   `+0x54` rather than a CRC-32. Higher mode bits differ between loader builds.
 - The alternative is a DEFLATE-family update stream whose history is
   initialized from the existing installed fork. It is not independently
