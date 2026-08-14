@@ -617,7 +617,7 @@ static void recover_lite_paths(Record *records, size_t count) {
     }
 }
 
-static char *safe_name(const char *name, bool flat) {
+static char *safe_name(const char *name) {
     size_t n = strlen(name);
     char *s = malloc(n + 32), *q = s;
     if (!s)
@@ -626,15 +626,8 @@ static char *safe_name(const char *name, bool flat) {
         unsigned char c = (unsigned char)name[i];
         if (c == 0)
             continue;
-        if (flat && !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                      c == '.' || c == '_' || c == '-')) {
-            if (q == s || q[-1] != '_')
-                *q++ = '_';
-        } else
-            *q++ = (c == '/' ? ':' : (char)c);
+        *q++ = (c == '/' ? ':' : (char)c);
     }
-    while (flat && q > s && q[-1] == '_')
-        q--;
     *q = 0;
     if (!*s)
         strcpy(s, "unnamed");
@@ -647,11 +640,11 @@ static char *safe_name(const char *name, bool flat) {
 
 static char *record_path_name(const Record *all, const Record *record) {
     if (record->name)
-        return safe_name(record->name, false);
+        return safe_name(record->name);
 
     char fallback[32];
     snprintf(fallback, sizeof(fallback), "unnamed-%04zu", (size_t)(record - all));
-    return safe_name(fallback, false);
+    return safe_name(fallback);
 }
 
 static Record *dir_by_id(Record *r, size_t n, uint32_t id) {

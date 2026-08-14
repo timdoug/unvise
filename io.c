@@ -58,8 +58,14 @@ Buffer read_file(const char *path) {
 
     if (!p)
         die("out of memory");
-    if ((size_t)length != fread(p, 1, (size_t)length, f))
-        die_errno(path);
+    errno = 0;
+    size_t read = fread(p, 1, (size_t)length, f);
+    if ((size_t)length != read) {
+        if (errno)
+            die_errno(path);
+        fprintf(stderr, "unvise: %s: unexpected end of file\n", path);
+        exit(1);
+    }
     if (fclose(f))
         die_errno(path);
 

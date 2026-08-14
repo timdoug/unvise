@@ -406,6 +406,9 @@ static void extract_shared(const Extraction *x, size_t index) {
 
 static void extract_framed(const Extraction *x, size_t index) {
     const Record *record = &x->records[index];
+
+    check_payload(x, record->payload, record->packed[0]);
+
     Buffer expanded =
         inflate_member(slice(x->payload_data, record->payload, record->packed[0]), x->table,
                        record->packed[1]);
@@ -512,20 +515,17 @@ static void write_directories(const Extraction *x) {
     }
 }
 
-static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *present) {
+static Buffer load_data0(Buffer resource, bool *owned, bool *present) {
     Buffer packed = {0}, code = {0};
 
     *owned = false;
-    *direct = false;
     *present = resource_find(resource, "DATA", 0, &packed);
 
     if (!*present)
         return (Buffer){0};
 
-    if (packed.n < 4 || be32(packed, 0) != UINT32_C(0xa89f000c)) {
-        *direct = true;
+    if (packed.n < 4 || be32(packed, 0) != UINT32_C(0xa89f000c))
         return packed;
-    }
 
     bool found_code = resource_find(resource, "CODE", 24, &code);
 
@@ -565,7 +565,7 @@ static CatalogLayout choose_layout(Buffer data, size_t catalog_offset, uint8_t r
                         catalog_uncompressed_layout(data.p[0x12], revision);
 }
 
-static void load_table(Extraction *x, Buffer data0, bool direct_table, bool has_data0) {
+static void load_table(Extraction *x, Buffer data0, bool has_data0) {
     if (!x->options->out)
         return;
 
@@ -574,9 +574,6 @@ static void load_table(Extraction *x, Buffer data0, bool direct_table, bool has_
     if (!has_data0) {
         if (!pef_table(x->data, x->table))
             die("could not find a unique VISE substitution table in the PEF application");
-    } else if (direct_table) {
-        if (find_permutation(data0, x->table) != 1)
-            data0_table(data0, x->table);
     } else if (find_permutation(data0, x->table) != 1)
         data0_table(data0, x->table);
 }
@@ -679,8 +676,8 @@ int run_installer(const Options *options, const char *input_path) {
     if (!found_resource)
         die_missing_resource_fork();
 
-    bool data0_owned, direct_table, has_data0, payload_owned;
-    Buffer data0 = load_data0(resource, &data0_owned, &direct_table, &has_data0);
+    bool data0_owned, has_data0, payload_owned;
+    Buffer data0 = load_data0(resource, &data0_owned, &has_data0);
     Buffer payload_data = input;
 
     payload_owned = false;
@@ -745,7 +742,7 @@ int run_installer(const Options *options, const char *input_path) {
         x.deferred = calloc(x.count, sizeof(*x.deferred));
         if (!x.deferred)
             die("out of memory");
-        load_table(&x, data0, direct_table, has_data0);
+        load_table(&x, data0, has_data0);
         extract_records(&x);
         if (options->out)
             write_directories(&x);
