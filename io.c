@@ -294,31 +294,55 @@ void make_parent_dir(const char *path) {
     free(copy);
 }
 
+static size_t add_offset(size_t base, size_t offset, const char *part) {
+    if (offset > SIZE_MAX - base) {
+        fprintf(stderr, "unvise: resource %s offset overflow\n", part);
+        exit(1);
+    }
+    return base + offset;
+}
+
+static size_t indexed_offset(size_t base, size_t index, size_t stride, const char *part) {
+    if (index > SIZE_MAX / stride)
+        die("resource table index overflow");
+    return add_offset(base, index * stride, part);
+}
+
+static unsigned resource_count(uint16_t minus_one) {
+    return minus_one == UINT16_MAX ? 0 : (unsigned)minus_one + 1;
+}
+
 bool resource_find(Buffer r, const char type[4], int wanted, Buffer *result) {
-    uint32_t db = be32(r, 0), mb = be32(r, 4), ml = be32(r, 12);
-    if (!span(r, mb, ml) || !span(r, mb + 24, 4))
+    size_t db = be32(r, 0), mb = be32(r, 4), ml = be32(r, 12);
+    size_t map_fields = add_offset(mb, 24, "map header");
+
+    if (!span(r, mb, ml) || !span(r, map_fields, 4))
         die("bad resource map");
-    size_t tl = mb + be16(r, mb + 24);
-    unsigned tc = (unsigned)be16(r, tl) + 1;
+    size_t tl = add_offset(mb, be16(r, map_fields), "type list");
+    /* The stored count is "types minus one"; 0xffff denotes an empty map. */
+    unsigned tc = resource_count(be16(r, tl));
     for (unsigned ti = 0; ti < tc; ti++) {
-        size_t te = tl + 2 + ti * 8;
+        size_t te = indexed_offset(add_offset(tl, 2, "type entries"), ti, 8,
+                                   "type entry");
         if (!span(r, te, 8))
             die("truncated resource type list");
         if (memcmp(r.p + te, type, 4))
             continue;
-        unsigned count = (unsigned)be16(r, te + 4) + 1;
-        size_t refs = tl + be16(r, te + 6);
+        unsigned count = resource_count(be16(r, add_offset(te, 4, "type count")));
+        size_t refs = add_offset(tl, be16(r, add_offset(te, 6, "reference list")),
+                                 "reference list");
         for (unsigned i = 0; i < count; i++) {
-            size_t ref = refs + i * 12;
+            size_t ref = indexed_offset(refs, i, 12, "reference");
             if (!span(r, ref, 12))
                 die("truncated resource reference");
             int id = (int16_t)be16(r, ref);
             if (id != wanted)
                 continue;
-            uint32_t rel =
-                ((uint32_t)r.p[ref + 5] << 16) | ((uint32_t)r.p[ref + 6] << 8) | r.p[ref + 7];
-            uint32_t n = be32(r, db + rel);
-            *result = slice(r, db + rel + 4, n);
+            size_t rel =
+                ((size_t)r.p[ref + 5] << 16) | ((size_t)r.p[ref + 6] << 8) | r.p[ref + 7];
+            size_t data = add_offset(db, rel, "data");
+            uint32_t n = be32(r, data);
+            *result = slice(r, add_offset(data, 4, "data body"), n);
             return true;
         }
     }

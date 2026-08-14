@@ -357,16 +357,21 @@ void data0_table(Buffer d, uint8_t table[256]) {
     }
     unsigned matches = 0;
 
-    for (unsigned start = 0; start <= 65536 - 256; start++)
-        if (set[start] && find_permutation((Buffer){mem + start, 256}, table) == 1) {
+    for (unsigned start = 0; start <= 65536 - 256; start++) {
+        uint8_t candidate[256];
+
+        if (set[start] && find_permutation((Buffer){mem + start, 256}, candidate) == 1) {
             bool all_set = true;
 
             for (unsigned i = 0; i < 256; i++)
                 all_set = all_set && set[start + i];
 
-            if (all_set)
+            if (all_set) {
+                memcpy(table, candidate, sizeof(candidate));
                 matches++;
+            }
         }
+    }
 
     if (matches != 1)
         die("could not identify a unique VISE substitution table");
