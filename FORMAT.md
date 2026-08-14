@@ -67,6 +67,11 @@ application can contain segment-1 members itself; records assigned to another
 segment, or whose member extends beyond the application's payload area, are
 external until the corresponding segment file is supplied.
 
+Some single-segment installers keep the payload bytes in a sibling file named
+`Installer.data`. Payload offsets address that companion directly; `unvise`
+uses it automatically when it is present beside the catalog-bearing
+application.
+
 Layout selection uses the low revision byte and the `CVCT+0x08` compression
 field; it does not inspect catalog contents for a likely structure:
 
@@ -77,10 +82,11 @@ field; it does not inspect catalog contents for a likely structure:
 | Compact | revisions 2, 3, or 4, uncompressed | 4.2, 4.5, 4.6.1 |
 | Normal | revisions 5 through 9 when uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
 | Wide | revisions 5 through 11 when compressed; revisions 10 and 11 when uncompressed | 6.5, 7.0, 7.0.1, 7.2, 7.3 |
-| Late | revisions 12 or 14, compressed with later bodies | 7.4, 8.0.2, 8.5 |
+| Late | revisions 12 through 14, compressed with later bodies | 7.4, 8.0.2, 8.5 |
 
-Revision 13 is unsupported and rejected. VISE 5.0.1 uses a normal uncompressed
-catalog even when it contains a `PACK` record.
+Revision 13 file/action catalogs are supported; no revision-13 directory record
+has been observed, so its `DVCT` body size remains unknown. VISE 5.0.1 uses a
+normal uncompressed catalog even when it contains a `PACK` record.
 
 ## DVCT directory record
 
@@ -170,6 +176,19 @@ bit numbering makes this mask `0x08000000` when the four bytes are read as a
 big-endian integer. The secondary name is read afterward. File records have
 this bit clear. Timestamps use the classic Mac 1904 epoch.
 
+Late action tails additionally use these subtype fields:
+
+- subtype 14 appends `be16(+0x38)` bytes;
+- subtype 15 appends the byte counts at `+0xc1` and `+0xc5`;
+- subtype 17 appends `be16(+0x38)` bytes.
+
+Some generation-0 short catalogs address an embedded copy of the corresponding
+`FVCT` record; others address the member directly. The embedded form is
+self-identifying by its `FVCT` signature, and every payload in the catalog must
+use the same form. Its header length is computed with the same fixed body and
+trailing-name fields as the catalog copy. Generation 2 uses direct offsets in
+the observed corpus.
+
 ### Compact catalog
 
 - Fork sizes and the payload offset retain their common offsets.
@@ -248,15 +267,15 @@ Several `FVCT` records may reference one compressed member:
 
 ### Base-dependent update members
 
-Some VISE 7.3 resource records occur in same-name pairs with identical expanded
-sizes and Finder information:
+Some wide and late catalogs contain same-name records with identical expanded
+sizes, Finder information, and reconstructed parents:
 
 - A self-contained record has the low payload-mode bit set at `+0x60`,
   compressed bytes, and a CRC-32 at `+0x54`.
 - Its alternative has the low payload-mode bit clear and a small selector at
   `+0x54` rather than a CRC-32. Higher mode bits differ between loader builds.
-- The alternative is a DEFLATE-family update stream whose 64 KiB history is
-  initialized from an existing installed resource fork. It is not independently
+- The alternative is a DEFLATE-family update stream whose history is
+  initialized from the existing installed fork. It is not independently
   extractable and is listed as `base-dependent` rather than emitted.
 - The installer can therefore update a matching installed file cheaply or use
   the paired self-contained member for a fresh installation.
@@ -440,7 +459,8 @@ Processing order:
   immediately preceding directory. Other unresolved Lite destinations are
   rejected.
 - Revision 12 uses `0xa0`-byte `DVCT` bodies; revision 14 uses `0xa4`-byte
-  bodies. Revision 13 is unsupported and rejected.
+  bodies. Revision 13 is accepted when no `DVCT` occurs; its directory body
+  has not been observed.
 - The complete semantics of every `FVCT` subtype and flag are not known.
   File/action classification and variable action tails follow the format's
   revision-specific structure and require the next record signature at the
@@ -454,9 +474,9 @@ Processing order:
   bytes. Their nominal payload offsets do not identify stored members and the
   field at `+0x54` is not a fork CRC. They are installer-internal references,
   not extractable byte streams, and are listed but not emitted.
-- VISE 7.3 base-dependent update members require the previous installed
-  resource fork as decoder history. Their paired self-contained files are
-  extracted; the update members are recognized, listed, and not emitted.
+- Base-dependent update members require a previous installed fork as decoder
+  history. Their paired self-contained files are extracted; the update members
+  are recognized, listed, and not emitted.
 - Active Install catalogs can refer to an external archive. Its container and
   retrieval protocol are unsupported.
 - Multi-segment catalogs are recognized and their locally stored members are

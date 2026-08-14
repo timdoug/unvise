@@ -5,11 +5,11 @@
  * MacBinary, BinHex, and StuffIt are transport/archive formats outside its
  * scope; remove them first with unar or macutils while preserving both forks.
  *
- * The implementation is tested against 36 freeware, shareware, demo, and
- * InstallerVISE self-installer archives made with Lite 3.6 and versions 4.2
- * through 8.5. It remains reverse-engineered: password-protected members,
- * some hierarchy rules and Active Install external
- * payloads are documented limitations.
+ * The implementation is tested against a broad corpus of freeware, shareware,
+ * demo, and InstallerVISE self-installer archives made with Lite 3.6 and
+ * versions 4.2 through 8.5. It remains reverse-engineered: password-protected
+ * members, some hierarchy rules, and Active Install external payloads are
+ * documented limitations.
  */
 
 static void usage(FILE *f) {

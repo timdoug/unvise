@@ -7,7 +7,7 @@ typedef struct {
 
 typedef struct {
     const Options *options;
-    Buffer data;
+    Buffer data, payload_data;
     uint32_t catalog_offset;
     CatalogLayout layout;
     bool catalog_packed;
@@ -66,6 +66,11 @@ static void print_record(const Record *record, size_t index, bool raw_names) {
 }
 
 static void check_payload(const Extraction *x, size_t offset, size_t packed_size) {
+    if (x->payload_data.p != x->data.p) {
+        if (!span(x->payload_data, offset, packed_size))
+            die("payload outside companion archive");
+        return;
+    }
     if (x->catalog_packed && offset >= x->catalog_offset)
         die("installer uses an external web payload archive; the stub alone cannot be extracted");
     if (offset > x->catalog_offset || packed_size > x->catalog_offset - offset)
@@ -184,7 +189,8 @@ static void extract_offset_forks(const Extraction *x, size_t index) {
     check_payload(x, record->payload, record->packed[0]);
 
     Buffer expanded =
-        inflate_member(slice(x->data, record->payload, record->packed[0]), x->table, total);
+        inflate_member(slice(x->payload_data, record->payload, record->packed[0]), x->table,
+                       total);
     const uint8_t *data = expanded.p + record->fork_offset[0];
     const uint8_t *resource = expanded.p + record->fork_offset[1];
 
@@ -291,7 +297,7 @@ static void extract_shared_resource_endpoint(const Extraction *x, uint32_t paylo
 
     check_payload(x, payload, packed_size);
     Buffer expanded =
-        inflate_member(slice(x->data, payload, packed_size), x->table, expanded_size);
+        inflate_member(slice(x->payload_data, payload, packed_size), x->table, expanded_size);
 
     for (size_t i = 0; i < x->count; i++)
         if (same_payload(&x->records[i], payload)) {
@@ -391,7 +397,8 @@ static void extract_shared(const Extraction *x, size_t index) {
     check_payload(x, record->payload, packed_size);
 
     Buffer expanded =
-        inflate_member(slice(x->data, record->payload, packed_size), x->table, expanded_size);
+        inflate_member(slice(x->payload_data, record->payload, packed_size), x->table,
+                       expanded_size);
 
     distribute_shared(x, record->payload, expanded);
     free(expanded.p);
@@ -399,8 +406,9 @@ static void extract_shared(const Extraction *x, size_t index) {
 
 static void extract_framed(const Extraction *x, size_t index) {
     const Record *record = &x->records[index];
-    Buffer expanded = inflate_member(slice(x->data, record->payload, record->packed[0]), x->table,
-                                     record->packed[1]);
+    Buffer expanded =
+        inflate_member(slice(x->payload_data, record->payload, record->packed[0]), x->table,
+                       record->packed[1]);
 
     if (record->fork_offset[0] > expanded.n ||
         record->expanded[0] > expanded.n - record->fork_offset[0])
@@ -420,7 +428,7 @@ static void extract_separate_forks(const Extraction *x, size_t index) {
         if (record->packed[fork]) {
             check_payload(x, position, record->packed[fork]);
 
-            expanded[fork] = inflate_member(slice(x->data, position, record->packed[fork]),
+            expanded[fork] = inflate_member(slice(x->payload_data, position, record->packed[fork]),
                                             x->table, record->expanded[fork]);
             position += record->packed[fork];
         }
@@ -570,6 +578,72 @@ static void free_records(Record *records, size_t count) {
     free(records);
 }
 
+static void skip_short_payload_headers(Extraction *x) {
+    bool decided = false, embedded = false;
+
+    if (x->layout != CATALOG_SHORT)
+        return;
+
+    for (size_t i = 0; i < x->count; i++) {
+        Record *record = &x->records[i];
+
+        if (!record->file || (!record->packed[0] && !record->packed[1]))
+            continue;
+
+        bool has_header = span(x->payload_data, record->payload, 4) &&
+                          !memcmp(x->payload_data.p + record->payload, "FVCT", 4);
+        if (!decided) {
+            embedded = has_header;
+            decided = true;
+        } else if (has_header != embedded)
+            die("inconsistent short catalog payload headers");
+        if (!embedded)
+            continue;
+
+        size_t header_size = record->end - record->off;
+        if (!span(x->payload_data, record->payload, header_size))
+            die("truncated embedded FVCT payload header");
+        if (record->payload > UINT32_MAX - header_size)
+            die("short catalog payload offset overflow");
+        record->payload += (uint32_t)header_size;
+    }
+}
+
+static Buffer companion_archive(const char *input_path, const char *resolved_path,
+                                Buffer input, bool *owned) {
+    size_t n = strlen(input_path);
+    struct stat st;
+
+    *owned = false;
+    if (strcmp(input_path, resolved_path))
+        return input;
+
+    char *path = malloc(n + sizeof(".data"));
+    if (!path)
+        die("out of memory");
+    strcpy(path, input_path);
+    strcat(path, ".data");
+
+    if (stat(path, &st)) {
+        if (errno != ENOENT) {
+            fprintf(stderr, "unvise: %s: %s\n", path, strerror(errno));
+            exit(1);
+        }
+        free(path);
+        return input;
+    }
+
+    Buffer companion = read_file(path);
+    free(path);
+    if (companion.n >= 4 && !memcmp(companion.p, "SVCT", 4)) {
+        free(companion.p);
+        return input;
+    }
+
+    *owned = true;
+    return companion;
+}
+
 int run_installer(const Options *options, const char *input_path) {
     char *resolved_path = data_fork_path(input_path);
     Buffer input = read_file(resolved_path);
@@ -587,8 +661,13 @@ int run_installer(const Options *options, const char *input_path) {
     if (!found_resource)
         die_missing_resource_fork();
 
-    bool data0_owned, direct_table, has_data0;
+    bool data0_owned, direct_table, has_data0, payload_owned;
     Buffer data0 = load_data0(resource, &data0_owned, &direct_table, &has_data0);
+    Buffer payload_data = input;
+
+    payload_owned = false;
+    if (options->out)
+        payload_data = companion_archive(input_path, resolved_path, input, &payload_owned);
 
     if (input.n < 0x28)
         die("truncated InstallerVISE SVCT data fork");
@@ -609,6 +688,7 @@ int run_installer(const Options *options, const char *input_path) {
     Extraction x = {
         .options = options,
         .data = input,
+        .payload_data = payload_data,
         .catalog_offset = catalog_offset,
         .layout = choose_layout(input, catalog_offset, revision),
         .catalog_packed = be32(input, catalog_offset + 8) != 0,
@@ -631,6 +711,7 @@ int run_installer(const Options *options, const char *input_path) {
     if (options->list || options->out) {
         x.records = catalog(catalog_data, record_offset, catalog_records, x.layout,
                             options->raw_names, revision, &x.count);
+        skip_short_payload_headers(&x);
         for (size_t i = 0; i < x.count; i++) {
             Record *record = &x.records[i];
             size_t packed_size = (size_t)record->packed[0] + record->packed[1];
@@ -658,6 +739,8 @@ int run_installer(const Options *options, const char *input_path) {
         free(catalog_data.p);
     if (data0_owned)
         free(data0.p);
+    if (payload_owned)
+        free(payload_data.p);
     free(resource.p);
     free(input.p);
     free(resolved_path);

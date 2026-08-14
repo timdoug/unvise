@@ -122,6 +122,10 @@ unar -k hidden package.sit        # produces Installer and ._Installer
 ./unvise -x output Installer
 ```
 
+Keep a separate `Installer.data` payload archive beside `Installer`; it is
+detected automatically. This is distinct from a macutils `.data`/`.rsrc` fork
+pair, for which `Installer` itself does not exist.
+
 The traditional `macutils` tools provide a tested path for direct MacBinary
 installers:
 
