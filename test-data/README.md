@@ -4,7 +4,7 @@ InstallerVISE fixtures used for compatibility and regression checks. The
 third-party archives are stored locally and ignored by Git; `SHA256SUMS`
 identifies their exact contents.
 
-## Fixtures
+## Original fixtures
 
 | Archive | InstallerVISE | Wrapper or expected behavior |
 | --- | --- | --- |
@@ -59,20 +59,52 @@ identifies their exact contents.
 | `IVISE8.5_NormalInstall.bin` | 8.5 | extracts after removing MacBinary |
 | `InstallerVISE85.sit_.bin` | 8.5 | contains the preceding installer |
 
+## File-format sample corpus
+
+The 38 additional files from Sembiance's
+[`installerVISE` sample directory](https://sembiance.com/fileFormatSamples/archive/installerVISE/)
+normalize to 36 distinct InstallerVISE applications:
+
+- 32 have complete local payloads and extract successfully.
+- `Installer` and `インストーラ` are multi-segment catalogs. Their local
+  members extract; members assigned to the absent media segments are listed
+  but not emitted.
+- `Install Secret Paths` and `Install ScreenSaver` arrived as flat data forks
+  without their resource forks and therefore cannot be decoded.
+- `Tropico Demo Installer.data` is the companion payload archive for `Tropico
+  Demo Installer`; keeping the files together exercises automatic companion
+  discovery.
+- Seven `.bin` files contain two nested MacBinary layers and yield six distinct
+  applications; the two Office Manager wrappers decode identically. Both
+  layers are intentionally retained as transport fixtures.
+- Cinepak's inner MacBinary header has an invalid CRC. Correcting that transport
+  checksum in a temporary copy lets Apple's `macbinary` decode it; the enclosed
+  installer then extracts successfully.
+
+This set covers SVCT generations 0, 2, and 3; short direct and embedded-`FVCT`
+payloads; media segments; a companion payload archive; revisions 13 and 14;
+late action records; and late base-dependent updates.
+
 ## Coverage
 
-- 50 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
-  through 8.5.
-- 45 contain complete local payloads and extract successfully.
-- Five are Active Install fixtures. The two VISE 6 wrappers contain the same
+- 88 downloaded fixtures represent 78 distinct InstallerVISE applications.
+- 70 distinct applications contain complete local payloads and extract
+  successfully.
+- Four distinct applications are Active Install stubs. Five outer fixtures
+  represent them because the two VISE 6 wrappers contain the same
   stub; the VISE 7.0.1, 7.2, and 8.0.2 stubs are independent. All five report
   the unsupported external payload rather than producing a partial extraction.
+- Two multi-segment applications extract their local members and report the
+  absent media members.
+- Two flat uploads cannot be decoded because their resource forks were lost
+  before archival.
 - The paired `.bin` and `.hqx` MacPython fixtures decode to identical data and
   resource forks. Both forms are retained to cover their transport paths.
 
 ## Outer archives
 
-- `unar` unwraps 49 fixtures completely. Its MacBinary reader fails on the
+- In the original 50-file set, `unar` unwraps 49 fixtures completely. Its
+  MacBinary reader fails on the
   18 MB Tcl/Tk 8.3.4 file; splitting that file's forks directly produces a
   valid installer.
 - Nested HQX/StuffIt fixtures require separate extraction of the HQX and
@@ -99,3 +131,5 @@ identifies their exact contents.
   downloads directory at `https://ppcmla.org/downloads/`.
 - `AIM_4.3.hqx` is AOL Instant Messenger 4.3 from the same preserved PPCMLA
   downloads directory.
+- The 38 file-format samples came from Sembiance's public InstallerVISE sample
+  directory linked above.

@@ -24,6 +24,11 @@ Compatibility has been verified with freeware, shareware, and demo installers:
 Across these versions, `unvise` supports data and resource forks, catalog
 hierarchy, and mixed VISE/DEFLATE members.
 
+The compatibility corpus contains 88 downloaded fixtures representing 78
+distinct applications. It also exercises early SVCT generations 0 and 2 and
+revision 13, whose exact InstallerVISE marketing versions are not embedded in
+the samples.
+
 ## Usage
 
 Build with a C99 compiler and zlib:
@@ -141,8 +146,9 @@ extract that separately before running `unvise`.
 
 Password-protected archives are unsupported. Active Install web stubs are
 recognized, but their external payload archives are not downloaded or decoded.
-Installer actions and directory permissions are not applied. Native MSVC
-builds are unsupported.
+Members assigned to absent media segments are listed but not emitted. Installer
+actions and directory permissions are not applied. Native MSVC builds are
+unsupported.
 
 See [FORMAT.md](FORMAT.md) for format details and
 [test-data/README.md](test-data/README.md) for the compatibility corpus.
