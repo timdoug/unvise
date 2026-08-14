@@ -10,6 +10,7 @@ typedef struct {
     Buffer data;
     uint32_t catalog_offset;
     CatalogLayout layout;
+    bool catalog_packed;
     Record *records;
     size_t count;
     uint8_t table[256];
@@ -25,6 +26,7 @@ typedef enum {
 
 static bool record_has_payload(const Record *record) {
     return !strcmp(record->tag, "FVCT") && record->file && !record->base_dependent &&
+           !record->external &&
            (record->expanded[0] || record->expanded[1]) &&
            (record->packed[0] || record->packed[1]);
 }
@@ -50,6 +52,10 @@ static void print_record(const Record *record, size_t index, bool raw_names) {
 
     if (record->base_dependent)
         fputs(" base-dependent", stdout);
+    if (record->external)
+        fputs(" external", stdout);
+    if (record->segment)
+        printf(" segment=%u", record->segment);
 
     if (record->name) {
         fputs(" name=", stdout);
@@ -60,7 +66,7 @@ static void print_record(const Record *record, size_t index, bool raw_names) {
 }
 
 static void check_payload(const Extraction *x, size_t offset, size_t packed_size) {
-    if (catalog_is_packed(x->layout) && offset >= x->catalog_offset)
+    if (x->catalog_packed && offset >= x->catalog_offset)
         die("installer uses an external web payload archive; the stub alone cannot be extracted");
     if (offset > x->catalog_offset || packed_size > x->catalog_offset - offset)
         die("payload overlaps catalog");
@@ -240,6 +246,9 @@ static size_t shared_packed_size(const Extraction *x, const Record *record,
         if (record->packed[0] && *expanded_size)
             return record->packed[0];
     } else if (has_data && record->packed[0] && record->packed[1]) {
+        *expanded_size = record->packed[1];
+        return record->packed[0];
+    } else if (!has_data && record->packed[0] && record->packed[1]) {
         *expanded_size = record->packed[1];
         return record->packed[0];
     } else if (!has_data && record->packed[1]) {
@@ -512,7 +521,8 @@ static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *prese
 
     if (!resource_find(resource, "CODE", 24, &code) &&
         !resource_find(resource, "CODE", 23, &code) &&
-        !resource_find(resource, "CODE", 18, &code))
+        !resource_find(resource, "CODE", 18, &code) &&
+        !resource_find(resource, "CODE", 20, &code))
         die("packed DATA 0 lacks its dictionary resource");
 
     if (code.n >= 4 && be32(code, 0) == UINT32_C(0xa89f000c)) {
@@ -532,8 +542,8 @@ static Buffer load_data0(Buffer resource, bool *owned, bool *direct, bool *prese
 static CatalogLayout choose_layout(Buffer data, size_t catalog_offset, uint8_t revision) {
     bool compressed = be32(data, catalog_offset + 8) != 0;
 
-    return compressed ? catalog_compressed_layout(revision) :
-                        catalog_uncompressed_layout(revision);
+    return compressed ? catalog_packed_layout(revision) :
+                        catalog_uncompressed_layout(data.p[0x12], revision);
 }
 
 static void load_table(Extraction *x, Buffer data0, bool direct_table, bool has_data0) {
@@ -585,6 +595,7 @@ int run_installer(const Options *options, const char *input_path) {
 
     uint32_t version = be32(input, 4);
     uint8_t revision = input.p[0x13];
+    uint32_t segment_count = be32(input, 0x14);
     uint32_t catalog_offset = be32(input, 0x24);
 
     if (catalog_offset >= input.n || !span(input, catalog_offset, 4) ||
@@ -600,12 +611,13 @@ int run_installer(const Options *options, const char *input_path) {
         .data = input,
         .catalog_offset = catalog_offset,
         .layout = choose_layout(input, catalog_offset, revision),
+        .catalog_packed = be32(input, catalog_offset + 8) != 0,
     };
     Buffer catalog_data = input;
     size_t record_offset = catalog_offset;
     bool catalog_owned = false;
 
-    if (catalog_is_packed(x.layout)) {
+    if (x.catalog_packed) {
         if (!span(input, catalog_offset + 0x14, 4) ||
             memcmp(input.p + catalog_offset + 0x14, "PACK", 4))
             die("packed catalog lacks a PACK header");
@@ -619,6 +631,18 @@ int run_installer(const Options *options, const char *input_path) {
     if (options->list || options->out) {
         x.records = catalog(catalog_data, record_offset, catalog_records, x.layout,
                             options->raw_names, revision, &x.count);
+        for (size_t i = 0; i < x.count; i++) {
+            Record *record = &x.records[i];
+            size_t packed_size = (size_t)record->packed[0] + record->packed[1];
+            bool outside_main_segment = record->payload > catalog_offset ||
+                                        packed_size > catalog_offset - record->payload;
+
+            if (segment_count > 1 && record->file &&
+                (record->segment != 1 || outside_main_segment) &&
+                (record->expanded[0] || record->expanded[1]) &&
+                (record->packed[0] || record->packed[1]))
+                record->external = true;
+        }
         x.deferred = calloc(x.count, sizeof(*x.deferred));
         if (!x.deferred)
             die("out of memory");

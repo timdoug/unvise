@@ -35,11 +35,13 @@ identifies their exact contents.
 | `vise65.sit` | 6.5 | extracts after `unar` |
 | `vise65-macbinary.bin` | 6.5 | MacBinary; matches `vise65.sit` |
 | `icontrol12.sit` | 6.5 | extracts after `unar` |
+| `install_aol_5.0.hqx` | 6.5 | action-heavy catalog with shared payload groups |
 | `interarchy40.sit` | 7.0 | extracts after `unar` |
 | `interarchy38.sit` | 7.0 | extracts after `unar` |
 | `TclTk_8.3.2p1_RuntimeInstall.bin` | 7.0.1 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.2_WebInstall.bin` | 7.0.1 Active Install | reports missing external payload |
 | `default-folder-312.hqx` | 7.0.1 | extracts complete files; recognizes paired base-dependent updates |
+| `AIM_4.3.hqx` | 7.0.1 | uncompressed wide catalog with action records |
 | `TclTk_8.3.3_RuntimeInstall.bin` | 7.2 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.3_FullInstall.bin` | 7.2 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.3_WebInstall.bin` | 7.2 Active Install | reports missing external payload |
@@ -59,9 +61,9 @@ identifies their exact contents.
 
 ## Coverage
 
-- 48 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
+- 50 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
   through 8.5.
-- 43 contain complete local payloads and extract successfully.
+- 45 contain complete local payloads and extract successfully.
 - Five are Active Install fixtures. The two VISE 6 wrappers contain the same
   stub; the VISE 7.0.1, 7.2, and 8.0.2 stubs are independent. All five report
   the unsupported external payload rather than producing a partial extraction.
@@ -70,7 +72,7 @@ identifies their exact contents.
 
 ## Outer archives
 
-- `unar` unwraps 47 fixtures completely. Its MacBinary reader fails on the
+- `unar` unwraps 49 fixtures completely. Its MacBinary reader fails on the
   18 MB Tcl/Tk 8.3.4 file; splitting that file's forks directly produces a
   valid installer.
 - Nested HQX/StuffIt fixtures require separate extraction of the HQX and
@@ -93,3 +95,7 @@ identifies their exact contents.
   `https://www.sonnettech.com/downloads/software/c7200_install_v11.hqx`.
 - `default-folder-312.hqx` is St. Clair Software's Default Folder 3.1.2 from
   `https://ftp.lip6.fr/pub/mac/info-mac/gui/default-folder-312.hqx`.
+- `install_aol_5.0.hqx` is America Online 5.0 from the preserved PPCMLA
+  downloads directory at `https://ppcmla.org/downloads/`.
+- `AIM_4.3.hqx` is AOL Instant Messenger 4.3 from the same preserved PPCMLA
+  downloads directory.

@@ -58,7 +58,14 @@ bytes cannot create a record.
 | `+0x64` | variable | word-swapped raw-DEFLATE stream when compressed |
 
 A compressed catalog expands to ordinary `DVCT`, `FVCT`, and `PACK` records.
-This form is used by VISE 6.5, 7, and 8.
+This storage choice is independent of the record-body layout. VISE 7.0.1, for
+example, can store the same wide record bodies either directly or compressed.
+
+`SVCT+0x14` is the number of media segments. In a multi-segment installer,
+`FVCT+0x62` selects the segment containing the member. The catalog-bearing
+application can contain segment-1 members itself; records assigned to another
+segment, or whose member extends beyond the application's payload area, are
+external until the corresponding segment file is supplied.
 
 Layout selection uses the low revision byte and the `CVCT+0x08` compression
 field; it does not inspect catalog contents for a likely structure:
@@ -66,13 +73,14 @@ field; it does not inspect catalog contents for a likely structure:
 | Layout | Revision and storage | InstallerVISE versions |
 | --- | --- | --- |
 | Lite | revision 0, uncompressed | Lite 3.6 |
+| Short | generations 0 and 2, revisions 1 or 2, uncompressed | early VISE archives |
 | Compact | revisions 2, 3, or 4, uncompressed | 4.2, 4.5, 4.6.1 |
-| Normal | revisions 5 through 11, uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
-| Compressed | revisions 5 through 11, word-swapped raw DEFLATE | 6.5, 7.0, 7.3 |
+| Normal | revisions 5 through 9 when uncompressed | 5.0.1, 5.5, 5.5.1, 5.5.2, 6.0, 6.0.1 |
+| Wide | revisions 5 through 11 when compressed; revisions 10 and 11 when uncompressed | 6.5, 7.0, 7.0.1, 7.2, 7.3 |
 | Late | revisions 12 or 14, compressed with later bodies | 7.4, 8.0.2, 8.5 |
 
-Revision 1 and revision 13 are unsupported and rejected. VISE 5.0.1 uses a
-normal uncompressed catalog even when it contains a `PACK` record.
+Revision 13 is unsupported and rejected. VISE 5.0.1 uses a normal uncompressed
+catalog even when it contains a `PACK` record.
 
 ## DVCT directory record
 
@@ -139,7 +147,7 @@ restored parent mtime.
 | `+0x50` | 4 | expanded resource-fork size |
 | `+0x54` | 4 | CRC-32 of expanded forks for a self-contained file |
 | `+0x58` | 4 | parent directory ID or install-location token |
-| `+0x60` | 4 | payload mode in the ordinary compressed layout |
+| `+0x60` | 4 | payload mode in the wide layout |
 | `+0x64` | 4 | payload offset in the data fork |
 | `+0x68` | 4 | data-fork offset in a shared or combined expanded member |
 | `+0x6c` | 4 | resource-fork offset in that member |
@@ -328,7 +336,7 @@ The initializer command byte is decoded exhaustively:
 - `DATA` 0 and its initialization program are absent.
 - The permutation is read from the initialized data of the input PEF
   application, as in VISE 8.
-- Catalog records retain the ordinary compressed-layout name offsets
+- Catalog records retain the wide-layout name offsets
   (`DVCT+0x98` and `FVCT+0xbe`).
 - Catalog records have fixed `0x94`-byte `DVCT` and `0xba`-byte `FVCT` bodies.
   The low SVCT revision byte is 11; the late layout starts at revision 12.
@@ -451,3 +459,6 @@ Processing order:
   extracted; the update members are recognized, listed, and not emitted.
 - Active Install catalogs can refer to an external archive. Its container and
   retrieval protocol are unsupported.
+- Multi-segment catalogs are recognized and their locally stored members are
+  extracted. Members assigned to absent media segments are listed but not
+  emitted.

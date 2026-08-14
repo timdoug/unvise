@@ -1,9 +1,5 @@
 #include "unvise.h"
 
-bool catalog_is_packed(CatalogLayout layout) {
-    return layout == CATALOG_COMPRESSED || layout == CATALOG_LATE;
-}
-
 bool catalog_has_late_payloads(CatalogLayout layout) {
     return layout == CATALOG_LATE;
 }
@@ -103,24 +99,28 @@ void print_quoted(FILE *f, const char *s, bool raw) {
     fputc('"', f);
 }
 
-CatalogLayout catalog_uncompressed_layout(uint8_t revision) {
+CatalogLayout catalog_uncompressed_layout(uint8_t generation, uint8_t revision) {
     /*
      * The 68K loaders dispatch on the low byte of the SVCT format field.
-     * Revision 0 is Lite, revisions 2--4 use compact bodies, and later
-     * pre-Carbon revisions use the normal bodies. Revision 1 has not been
-     * recovered or observed, so do not silently assign it a layout.
+     * Revision 0 is Lite. Generations 0 and 2 use short bodies for revisions
+     * 1 and 2; generation 3 uses compact bodies for revisions 1--4. Revisions
+     * 5--9 use normal bodies, and revisions 10--11 use wide bodies.
      */
     if (revision == 0)
         return CATALOG_LITE;
-    if (revision >= 2 && revision <= 4)
+    if (generation < 3 && revision >= 1 && revision <= 2)
+        return CATALOG_SHORT;
+    if (revision >= 1 && revision <= 4)
         return CATALOG_COMPACT;
-    if (revision >= 5 && revision < 12)
+    if (revision >= 10 && revision < 12)
+        return CATALOG_WIDE;
+    if (revision >= 5 && revision < 10)
         return CATALOG_NORMAL;
     die("unsupported uncompressed catalog revision");
     return CATALOG_NORMAL;
 }
 
-CatalogLayout catalog_compressed_layout(uint8_t revision) {
+CatalogLayout catalog_packed_layout(uint8_t revision) {
     /*
      * The Carbon loaders are separate implementations, but retain the common
      * SVCT revision sequence. The VISE 7.3 PPC loader (revision 11) reads the
@@ -130,9 +130,9 @@ CatalogLayout catalog_compressed_layout(uint8_t revision) {
     if (revision >= 12)
         return CATALOG_LATE;
     if (revision >= 5)
-        return CATALOG_COMPRESSED;
+        return CATALOG_WIDE;
     die("unsupported compressed catalog revision");
-    return CATALOG_COMPRESSED;
+    return CATALOG_WIDE;
 }
 
 static bool late_next_tag(Buffer data, size_t offset, bool last) {
@@ -255,7 +255,7 @@ static Record *parse_late_catalog(Buffer data, size_t expected, uint8_t revision
     return records;
 }
 
-static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
+static size_t variable_file_size(Buffer data, size_t offset, size_t fixed, bool padded_type5) {
     if (!span(data, offset, fixed))
         die("truncated FVCT record");
 
@@ -275,17 +275,19 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
     }
 
     switch (type) {
-    case 1:
     case 4:
     case 8:
         size += variable;
+        break;
+    case 1:
+        if (fixed >= 0xba)
+            size += variable;
         break;
     case 2:
         if (fixed >= 0xba)
             size += variable;
         break;
     case 3:
-    case 5:
     case 9:
     case 10: {
         size_t length_offset = size + variable;
@@ -293,6 +295,16 @@ static size_t variable_file_size(Buffer data, size_t offset, size_t fixed) {
         if (!span(data, offset + length_offset, 1))
             die("truncated action string");
         size = length_offset + 1 + data.p[offset + length_offset];
+        break;
+    }
+    case 5: {
+        size_t length_offset = size + variable;
+
+        if (!span(data, offset + length_offset, 1))
+            die("truncated action string");
+        size = length_offset + 1 + data.p[offset + length_offset];
+        if (padded_type5)
+            size += 2;
         break;
     }
     case 6:
@@ -342,7 +354,7 @@ static size_t compact_record_size(Buffer data, size_t offset, bool directory, ui
                 extra += be16(data, offset + 0x2e) + be16(data, offset + 0x32);
             size = record_fixed + names + extra;
         } else {
-            size = variable_file_size(data, offset, record_fixed);
+            size = variable_file_size(data, offset, record_fixed, false);
         }
     }
     if (!span(data, offset, size))
@@ -386,7 +398,19 @@ static Record *parse_catalog_records(Buffer data, size_t offset, size_t expected
         memcpy(record->tag, data.p + position, 4);
         record->tag[4] = 0;
 
-        if (layout == CATALOG_COMPACT)
+        if (layout == CATALOG_SHORT) {
+            if (!directory)
+                position += compact_record_size(data, position, false, revision,
+                                                &record->fixed_size);
+            else {
+                size_t fixed = 0x52;
+
+                if (!span(data, position + 0x50, 1))
+                    die("truncated short DVCT record");
+                record->fixed_size = (uint16_t)fixed;
+                position += fixed + data.p[position + 0x50];
+            }
+        } else if (layout == CATALOG_COMPACT)
             position +=
                 compact_record_size(data, position, directory, revision, &record->fixed_size);
         else if (directory) {
@@ -401,7 +425,7 @@ static Record *parse_catalog_records(Buffer data, size_t offset, size_t expected
             size_t fixed = layout == CATALOG_LITE ? 0x7c :
                            layout == CATALOG_NORMAL ? 0xba : 0xbe;
             record->fixed_size = (uint16_t)fixed;
-            position += variable_file_size(data, position, fixed);
+            position += variable_file_size(data, position, fixed, revision == 6);
         }
 
         if (i + 1 < expected && !semantic_tag(data, position))
@@ -427,6 +451,7 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
     record->packed[1] = be32(data, record->off + 0x4c);
     record->expanded[1] = be32(data, record->off + 0x50);
     record->checksum = be32(data, record->off + 0x54);
+    record->segment = be16(data, record->off + 0x62);
     record->payload = be32(data, record->off + 0x64);
     record->payload_mode = be32(data, record->off + 0x60);
     if (record->end - record->off > 0x75)
@@ -449,7 +474,9 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
 
     /* The original loaders use bit 4 of the first flag byte for actions. */
     record->file = (record->record_flags & UINT32_C(0x08000000)) == 0;
-    record->parent = be32(data, record->off + (layout == CATALOG_COMPACT ? 0x60 : 0x58));
+    record->parent = be32(data, record->off +
+                                     (layout == CATALOG_COMPACT || layout == CATALOG_SHORT ?
+                                          0x60 : 0x58));
     if (record->file && record->end - record->off >= 0x70) {
         record->has_fork_offsets = true;
         record->fork_offset[0] = be32(data, record->off + 0x68);
@@ -486,7 +513,7 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
             decode_file_record(data, record, layout);
     }
 
-    if (layout == CATALOG_COMPRESSED)
+    if (layout == CATALOG_WIDE)
         for (size_t i = 0; i < count; i++) {
             Record *record = &records[i];
 
