@@ -39,6 +39,7 @@ identifies their exact contents.
 | `interarchy38.sit` | 7.0 | extracts after `unar` |
 | `TclTk_8.3.2p1_RuntimeInstall.bin` | 7.0.1 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.2_WebInstall.bin` | 7.0.1 Active Install | reports missing external payload |
+| `default-folder-312.hqx` | 7.0.1 | extracts complete files; recognizes paired base-dependent updates |
 | `TclTk_8.3.3_RuntimeInstall.bin` | 7.2 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.3_FullInstall.bin` | 7.2 | MacBinary; extracts after `unar` |
 | `TclTk_8.3.3_WebInstall.bin` | 7.2 Active Install | reports missing external payload |
@@ -58,9 +59,9 @@ identifies their exact contents.
 
 ## Coverage
 
-- 47 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
+- 48 archived fixtures cover InstallerVISE Lite 3.6 and InstallerVISE 4.2
   through 8.5.
-- 42 contain complete local payloads and extract successfully.
+- 43 contain complete local payloads and extract successfully.
 - Five are Active Install fixtures. The two VISE 6 wrappers contain the same
   stub; the VISE 7.0.1, 7.2, and 8.0.2 stubs are independent. All five report
   the unsupported external payload rather than producing a partial extraction.
@@ -69,7 +70,7 @@ identifies their exact contents.
 
 ## Outer archives
 
-- `unar` unwraps 46 fixtures completely. Its MacBinary reader fails on the
+- `unar` unwraps 47 fixtures completely. Its MacBinary reader fails on the
   18 MB Tcl/Tk 8.3.4 file; splitting that file's forks directly produces a
   valid installer.
 - Nested HQX/StuffIt fixtures require separate extraction of the HQX and
@@ -90,3 +91,5 @@ identifies their exact contents.
   `https://www.sonnettech.com/downloads/software/ce_install_v231.hqx`.
 - `c7200_install_v11.hqx` is Sonnet's Crescendo 7200 1.1 installer from
   `https://www.sonnettech.com/downloads/software/c7200_install_v11.hqx`.
+- `default-folder-312.hqx` is St. Clair Software's Default Folder 3.1.2 from
+  `https://ftp.lip6.fr/pub/mac/info-mac/gui/default-folder-312.hqx`.

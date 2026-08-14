@@ -243,10 +243,10 @@ Several `FVCT` records may reference one compressed member:
 Some VISE 7.3 resource records occur in same-name pairs with identical expanded
 sizes and Finder information:
 
-- A self-contained record has subtype 2, a nonzero payload mode at `+0x60`,
+- A self-contained record has the low payload-mode bit set at `+0x60`,
   compressed bytes, and a CRC-32 at `+0x54`.
-- Its alternative has subtype 2, payload mode zero, and a small selector at
-  `+0x54` rather than a CRC-32.
+- Its alternative has the low payload-mode bit clear and a small selector at
+  `+0x54` rather than a CRC-32. Higher mode bits differ between loader builds.
 - The alternative is a DEFLATE-family update stream whose 64 KiB history is
   initialized from an existing installed resource fork. It is not independently
   extractable and is listed as `base-dependent` rather than emitted.
