@@ -672,7 +672,7 @@ int run_installer(const Options *options, const char *input_path) {
     unwrap_transport(&input, &resource, &found_resource);
 
     if (input.n < 4 || memcmp(input.p, "SVCT", 4))
-        die("not an InstallerVISE application; unpack any StuffIt layer first");
+        die("not an Installer VISE application; unpack any StuffIt layer first");
     if (!found_resource)
         die_missing_resource_fork();
 
@@ -685,7 +685,7 @@ int run_installer(const Options *options, const char *input_path) {
         payload_data = companion_archive(input_path, resolved_path, input, &payload_owned);
 
     if (input.n < 0x28)
-        die("truncated InstallerVISE SVCT data fork");
+        die("truncated Installer VISE SVCT data fork");
 
     uint32_t version = be32(input, 4);
     uint8_t revision = input.p[0x13];

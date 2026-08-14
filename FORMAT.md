@@ -1,4 +1,4 @@
-# InstallerVISE format notes
+# Installer VISE format notes
 
 This documents the subset implemented by `unvise`. Unless noted otherwise:
 
@@ -83,7 +83,7 @@ application.
 Layout selection uses the low revision byte and the `CVCT+0x08` compression
 field; it does not inspect catalog contents for a likely structure:
 
-| Layout | Revision and storage | InstallerVISE versions |
+| Layout | Revision and storage | Installer VISE versions |
 | --- | --- | --- |
 | Lite | revision 0, uncompressed | Lite 3.6 |
 | Short | generations 0 and 2, revisions 1 or 2, uncompressed | early VISE archives |
@@ -386,7 +386,7 @@ The initializer command byte is decoded exhaustively:
 - Expanding its packed-data section exposes the complete 256-byte permutation
   as a static byte array.
 - The table belongs to the compiled application rather than to an
-  InstallerVISE archive structure.
+  Installer VISE archive structure.
 - `Dcmp` 1005, labeled `Version 27 (PPC, decomp)`, obtains already-transformed
   16-bit words through the host application's read callback. It implements the
   DEFLATE-family decoder but does not contain or generate the permutation.

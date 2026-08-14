@@ -1,6 +1,6 @@
 # unvise
 
-`unvise` extracts classic Macintosh InstallerVISE archives on modern macOS and
+`unvise` extracts classic Macintosh Installer VISE archives on modern macOS and
 Linux, BSD, and other POSIX systems. It reads and writes native macOS forks,
 AppleDouble sidecars, and raw `.data`/`.rsrc` fork pairs. MacBinary and BinHex
 transport layers are decoded directly, including nested layers.
@@ -11,7 +11,7 @@ where the selected output format supports them.
 
 Compatibility has been verified with freeware, shareware, and demo installers:
 
-| InstallerVISE | Supported format features |
+| Installer VISE | Supported format features |
 | --- | --- |
 | Lite 3.6 | short catalogs, direct substitution tables, shared payload groups |
 | 4.2, 4.5, 4.6.1 | revision-sized compact records, literal or packed initialization, short actions |
@@ -27,7 +27,7 @@ hierarchy, and mixed VISE/DEFLATE members.
 
 The compatibility corpus contains 91 downloaded fixtures representing 81
 distinct applications. It also exercises early SVCT generations 0 and 2 and
-revision 13, whose exact InstallerVISE marketing versions are not embedded in
+revision 13, whose exact Installer VISE marketing versions are not embedded in
 the samples.
 
 ## Usage

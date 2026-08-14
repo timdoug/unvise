@@ -1,12 +1,12 @@
 # Test data
 
-InstallerVISE fixtures used for compatibility and regression checks. The
+Installer VISE fixtures used for compatibility and regression checks. The
 third-party archives are stored locally and ignored by Git; `SHA256SUMS`
 identifies their exact contents.
 
 ## Original fixtures
 
-| Archive | InstallerVISE | Wrapper or expected behavior |
+| Archive | Installer VISE | Wrapper or expected behavior |
 | --- | --- | --- |
 | `ram-charger-installer-81.hqx` | Lite 3.6 | StuffIt inside BinHex; extract with `unar` |
 | `icondropper30.sit` | Lite 3.6 | extracts after `unar` |
@@ -66,7 +66,7 @@ identifies their exact contents.
 
 The 38 additional files from Sembiance's
 [`installerVISE` sample directory](https://sembiance.com/fileFormatSamples/archive/installerVISE/)
-normalize to 36 distinct InstallerVISE applications:
+normalize to 36 distinct Installer VISE applications:
 
 - 32 have complete local payloads and extract successfully.
 - `Installer` and `インストーラ` are multi-segment catalogs. Their local
@@ -90,7 +90,7 @@ late action records; and late base-dependent updates.
 
 ## Coverage
 
-- 91 downloaded fixtures represent 81 distinct InstallerVISE applications.
+- 91 downloaded fixtures represent 81 distinct Installer VISE applications.
 - 72 distinct applications contain complete local payloads and extract
   successfully.
 - One application contains self-contained files plus an unpaired base-dependent
@@ -111,7 +111,7 @@ late action records; and late base-dependent updates.
 
 - `unvise` directly decodes the 59 fixtures whose transport chain consists
   only of MacBinary and/or BinHex. This includes all seven nested-MacBinary
-  fixtures and the nested-BinHex InstallerVISE 4.5 fixture.
+  fixtures and the nested-BinHex Installer VISE 4.5 fixture.
 - 29 fixtures contain StuffIt somewhere in their wrapper chain and still need
   an external StuffIt extractor. The remaining standalone MacBinary fixture is
   Tropico's companion payload rather than an installer.
@@ -149,5 +149,5 @@ late action records; and late base-dependent updates.
   downloads directory at `https://ppcmla.org/downloads/`.
 - `AIM_4.3.hqx` is AOL Instant Messenger 4.3 from the same preserved PPCMLA
   downloads directory.
-- The 38 file-format samples came from Sembiance's public InstallerVISE sample
+- The 38 file-format samples came from Sembiance's public Installer VISE sample
   directory linked above.

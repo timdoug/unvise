@@ -18,7 +18,7 @@ Buffer unpack_code(Buffer p, Buffer code) {
         die("unsupported packed-code flags");
 
     /*
-     * A89F000C is InstallerVISE's packed-code wrapper, not DEFLATE. Control
+     * A89F000C is Installer VISE's packed-code wrapper, not DEFLATE. Control
      * bytes select literal words, words from a dictionary in CODE 24, or
      * back-references into the output. The dictionary base expression below
      * comes from the installer's 68K unpacker and was checked against both its

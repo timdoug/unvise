@@ -47,7 +47,7 @@ typedef struct {
 } Options;
 
 typedef enum {
-    /* These are record layouts, not InstallerVISE version numbers. */
+    /* These are record layouts, not Installer VISE version numbers. */
     CATALOG_LITE,
     CATALOG_SHORT,
     CATALOG_COMPACT,

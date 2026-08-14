@@ -16,7 +16,7 @@ static void die_errno(const char *path) {
 }
 
 void die_missing_resource_fork(void) {
-    die("input is an InstallerVISE data fork, but its resource fork is missing; "
+    die("input is an Installer VISE data fork, but its resource fork is missing; "
         "unpack with 'unar -k hidden' or 'macunpack -f' and keep both forks together");
 }
 

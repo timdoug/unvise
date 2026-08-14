@@ -1,12 +1,12 @@
 #include "unvise.h"
 
 /*
- * unvise decodes the InstallerVISE layer of a classic Macintosh installer.
+ * unvise decodes the Installer VISE layer of a classic Macintosh installer.
  * MacBinary and BinHex transport layers are decoded recursively. StuffIt is
  * outside its scope and must be removed first while preserving both forks.
  *
  * The implementation is tested against a broad corpus of freeware, shareware,
- * demo, and InstallerVISE self-installer archives made with Lite 3.6 and
+ * demo, and Installer VISE self-installer archives made with Lite 3.6 and
  * versions 4.2 through 8.5. It remains reverse-engineered: password-protected
  * members, some hierarchy rules, and Active Install external payloads are
  * documented limitations.
