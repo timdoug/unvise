@@ -1,36 +1,30 @@
 # unvise
 
-`unvise` extracts classic Macintosh Installer VISE archives on modern macOS and
-Linux, BSD, and other POSIX systems. It reads and writes native macOS forks,
-AppleDouble sidecars, and raw `.data`/`.rsrc` fork pairs. MacBinary and BinHex
-transport layers are decoded directly, including nested layers.
+`unvise` extracts classic Macintosh Installer VISE archives on modern macOS,
+Linux, BSD, and other POSIX systems. It handles data and resource forks,
+MacBinary, BinHex, AppleDouble, and raw fork pairs.
 
-Expanded files are verified against the CRC-32 stored in their catalog
-records. Directory hierarchy, Finder information, and timestamps are preserved
-where the selected output format supports them.
+## Compatibility
 
-Compatibility has been verified with freeware, shareware, and demo installers:
+I've tested against hundreds of freeware, shareware, and demo installer fixtures:
 
 | Installer VISE | Supported format features |
 | --- | --- |
-| Lite 3.6 | short catalogs, direct substitution tables, shared payload groups |
-| 4.2, 4.5, 4.6.1 | revision-sized compact records, literal or packed initialization, short actions |
+| 3.0 | early compact catalogs |
+| 3.5 | early short catalogs, direct substitution tables, self-parent roots |
+| Lite 3.6 | Lite destinations, direct substitution tables, shared payload groups |
+| 4.0, 4.2, 4.5, 4.6.1 | revision-sized compact records, literal or packed initialization, short actions |
 | 5.0.1, 5.5, 5.5.1, 5.5.2 | packed and relocated initialization code, shared payloads, extended action records |
 | 6.0, 6.0.1 | self-hosting dictionaries, recognition of Active Install stubs |
-| 6.5 | compressed catalogs, shared payloads, unpaired base-dependent updates |
-| 7.0, 7.0.1, 7.2 | alternate initialization resources, offset-fork and gapped shared payloads |
+| 6.5 | compressed catalogs, shared and framed payloads, unpaired base-dependent updates |
+| 7.0, 7.0.1, 7.1, 7.1.1, 7.2 | alternate initialization resources, offset-fork and gapped shared payloads |
 | 7.3 | PEF-embedded substitution table, word-oriented members, base-dependent updates |
-| 7.4, 8.0.2, 8.5 | later compressed catalogs, framed and overlapping update payloads, mixed stored/compressed blocks |
+| 7.4, 8.0.1, 8.0.2, 8.2, 8.2.1, 8.3, 8.4, 8.5 | late catalogs, framed and overlapping update payloads, mixed stored/compressed blocks |
 
-Across these versions, `unvise` supports data and resource forks, catalog
-hierarchy, and mixed VISE/DEFLATE members.
+See [test-data/README.md](test-data/README.md) for
+more, and [FORMAT.md](FORMAT.md) for format details.
 
-The compatibility corpus contains 91 downloaded fixtures representing 81
-distinct applications. It also exercises early SVCT generations 0 and 2 and
-revision 13, whose exact Installer VISE marketing versions are not embedded in
-the samples.
-
-## Usage
+## Quick start
 
 Build with a C99 compiler and zlib:
 
@@ -38,123 +32,112 @@ Build with a C99 compiler and zlib:
 make
 ```
 
-List the installer catalog directly, or after extracting an enclosing StuffIt
-archive:
+List or extract an installer:
+
+```sh
+./unvise -l Installer
+./unvise -x output Installer
+```
+
+A listing looks like this:
 
 ```console
-$ installer="Escape Velocity Installer"
-$ ./unvise -l "$installer"
+$ ./unvise -l EV_Installer_1.0.5.bin
 SVCT version=1 size=5145057 catalog=0x4E6960
 0000 0x004E6960 CVCT size=0x14
 0001 0x004E6974 PACK size=0x50
 0002 0x004E69C4 DVCT size=0xAB name="Escape Velocity 1.0.5 ƒ"
-0003 0x004E6A6F FVCT size=0xBF payload=0x2C data=0x0->0x0 rsrc=0x3F6->0xA6E name="Icon\x0D"
+0003 0x004E6A6F FVCT size=0xBF payload=0x2C data=0x0->0x0 rsrc=0x3F6->0xA6E segment=1 name="Icon\x0D"
 ...
 ```
 
-Extract it. By default, the extracted forks are raw files named `name.data` or
-`name.rsrc`, matching `macunpack`'s conventions:
+Expanded files are checked against the CRC-32 values in the catalog.
+Directory hierarchy, Finder information, and timestamps are preserved where
+the selected output format supports them.
+
+## Output formats
+
+By default, each fork is an ordinary file named `name.data` or `name.rsrc`:
 
 ```console
-$ ./unvise -x raw-output "$installer"
+$ ./unvise -x output EV_Installer_1.0.5.bin
 SVCT version=1 size=5145057 catalog=0x4E6960
-$ find raw-output -type f | sort | head -n4
-raw-output/Escape Velocity 1.0.5 ƒ/ • READ ME • .data
-raw-output/Escape Velocity 1.0.5 ƒ/ • READ ME • .rsrc
-raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.data
-raw-output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.rsrc
+$ find output -type f | sort | head -n4
+output/Escape Velocity 1.0.5 ƒ/ • READ ME • .data
+output/Escape Velocity 1.0.5 ƒ/ • READ ME • .rsrc
+output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.data
+output/Escape Velocity 1.0.5 ƒ/Documentation ƒ/Ambrosia FAQ.text.rsrc
 ```
 
-Standard hidden AppleDouble sidecars are also supported:
+Use `-a` for standard hidden AppleDouble sidecars:
 
 ```console
-$ ./unvise -a -x appledouble-output "$installer"
-SVCT version=1 size=5145057 catalog=0x4E6960
-$ find appledouble-output -type f | sort | head -4
-appledouble-output/Escape Velocity 1.0.5 ƒ/ • READ ME •
-appledouble-output/Escape Velocity 1.0.5 ƒ/._ • READ ME •
-appledouble-output/Escape Velocity 1.0.5 ƒ/._EV Data
-appledouble-output/Escape Velocity 1.0.5 ƒ/._EV Graphics
+$ ./unvise -a -x output EV_Installer_1.0.5.bin
+$ find output -type f | sort | head -n4
+output/Escape Velocity 1.0.5 ƒ/ • READ ME •
+output/Escape Velocity 1.0.5 ƒ/._ • READ ME •
+output/Escape Velocity 1.0.5 ƒ/._EV Data
+output/Escape Velocity 1.0.5 ƒ/._EV Graphics
 ```
 
-On macOS, both forks can be preserved in one native file:
+On macOS, `-n` stores both forks in one native file:
 
 ```console
-$ ./unvise -n -x native-output "$installer"
-SVCT version=1 size=5145057 catalog=0x4E6960
-$ file=$(find native-output -type f -size +500k -print -quit)
-$ printf '%s\n' "$file"
-native-output/Escape Velocity 1.0.5 ƒ/Escape Velocity
+$ ./unvise -n -x output EV_Installer_1.0.5.bin
+$ file=$(find output -type f -size +500k -print -quit)
 $ stat -f 'data fork: %z bytes' "$file"
 data fork: 514331 bytes
 $ stat -f 'resource fork: %z bytes' "$file/..namedfork/rsrc"
 resource fork: 500871 bytes
 ```
 
-Names are converted from MacRoman to UTF-8 by default. On byte-oriented
-filesystems, `-r` instead preserves the original filename bytes. Raw-name
-listing escapes non-ASCII bytes; raw-name extraction is unavailable on macOS,
-whose filesystem APIs require valid UTF-8 paths.
+By default, MacRoman filenames are converted to UTF-8 for both listing and
+extraction. With `-r`, no character conversion is performed: listings write the
+original bytes to the terminal, and extraction uses them as pathname bytes.
+(Control characters are still escaped in listings so as not to disrupt the
+terminal.)
 
-## Preparing inputs
+Bemusingly, `-r` can list but cannot extract on modern macOS; its filesystem APIs
+require valid UTF-8 paths, and arbitrary MacRoman byte strings are not guaranteed
+to be valid UTF-8. Raw-name extraction works on byte-oriented filesystems such as
+those commonly used on Linux.
 
-MacBinary, BinHex, and StuffIt are common outer containers. `unvise` decodes
-MacBinary and BinHex itself. StuffIt must be unpacked separately while keeping
-both Macintosh forks.
+## Inputs
 
-Accepted installer inputs:
+`unvise` accepts:
 
 | Input | Representation |
 | --- | --- |
-| `Installer.bin` | MacBinary, including nested MacBinary |
-| `Installer.hqx` | BinHex, including nested BinHex or MacBinary |
+| `Installer.bin` | MacBinary |
+| `Installer.hqx` | BinHex |
 | `Installer` with a native resource fork | macOS |
 | `Installer` plus `._Installer` | AppleDouble |
 | `Installer.data` plus `Installer.rsrc` | raw forks from `macunpack -f` |
 
-For a raw pair, `unvise` accepts `Installer`, `Installer.data`, or
-`Installer.rsrc` and resolves both files automatically.
+MacBinary and BinHex layers are decoded recursively and may be nested in any
+order.
 
-MacBinary and BinHex files containing an installer can be passed directly:
+For a raw pair, any of `Installer`, `Installer.data`, or `Installer.rsrc` may
+be passed; the other fork is found automatically. A separate
+`Installer.data` payload archive beside an installer is also detected.
 
-```sh
-./unvise -x output Installer.bin
-./unvise -x output Installer.hqx
-```
-
-StuffIt compression remains outside `unvise`. If a MacBinary or BinHex layer
-contains StuffIt, `unvise` identifies that an archive layer remains. `unar`
-can remove the complete transport/archive chain while retaining both forks:
+StuffIt decompression requires an external tool such as `unar`. Unpack an
+archive while preserving both forks, then pass the resulting application to
+`unvise`:
 
 ```sh
-unar -k hidden package.hqx        # also accepts .sit or .bin
+unar -k hidden package.sit
 ./unvise -x output Installer
 ```
-
-Keep a separate `Installer.data` payload archive beside `Installer`; it is
-detected automatically. This is distinct from a macutils `.data`/`.rsrc` fork
-pair, for which `Installer` itself does not exist.
-
-The traditional `macutils` tools remain an alternative:
-
-```sh
-macunpack -f Installer.bin        # produces Installer.data and Installer.rsrc
-./unvise -x output Installer
-```
-
-`hexbin` can also remove a BinHex layer. If its output is a StuffIt archive,
-extract that separately before running `unvise`.
 
 ## Limitations
 
-Password-protected archives are unsupported. Active Install web stubs are
-recognized, but their external payload archives are not downloaded or decoded.
-Members assigned to absent media segments are listed but not emitted. Installer
-actions and directory permissions are not applied. Native MSVC builds are
-unsupported.
-
-See [FORMAT.md](FORMAT.md) for format details and
-[test-data/README.md](test-data/README.md) for the compatibility corpus.
+- Password-protected archives are unsupported.
+- Active Install web stubs are recognized, but their external payload archives
+  are not downloaded or decoded.
+- Members assigned to absent media segments are listed but not emitted.
+- Installer actions and directory permissions are not applied.
+- Native MSVC builds are unsupported.
 
 ## License
 

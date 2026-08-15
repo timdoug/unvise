@@ -90,7 +90,7 @@ CatalogLayout catalog_packed_layout(uint8_t revision);
 CatalogLayout catalog_uncompressed_layout(uint8_t generation, uint8_t revision);
 Record *catalog(Buffer data, size_t offset, size_t expected, CatalogLayout layout, bool raw_names,
                 uint8_t revision, size_t *count);
-void print_quoted(FILE *f, const char *s, bool raw);
+void print_quoted(FILE *f, const char *s);
 char *output_path(const Options *options, Record *records, size_t index, const char *fork);
 int run_installer(const Options *options, const char *input_path);
 

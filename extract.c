@@ -40,7 +40,7 @@ static bool same_payload(const Record *record, uint32_t payload) {
     return record_has_payload(record) && record->payload == payload;
 }
 
-static void print_record(const Record *record, size_t index, bool raw_names) {
+static void print_record(const Record *record, size_t index) {
     printf("%04zu 0x%08zX %-4s size=0x%zX", index, record->off, record->tag,
            record->end - record->off);
 
@@ -59,7 +59,7 @@ static void print_record(const Record *record, size_t index, bool raw_names) {
 
     if (record->name) {
         fputs(" name=", stdout);
-        print_quoted(stdout, record->name, raw_names);
+        print_quoted(stdout, record->name);
     }
 
     putchar('\n');
@@ -97,7 +97,7 @@ static void check_fork_crc(const Record *record, const uint8_t *data, const uint
         crc = fork_crc(crc, resource, record->expanded[1]);
     if (crc != record->checksum) {
         fputs("unvise: checksum mismatch for ", stderr);
-        print_quoted(stderr, record->name ? record->name : "unnamed", false);
+        print_quoted(stderr, record->name ? record->name : "unnamed");
         fprintf(stderr, ": expected 0x%08X, got 0x%08X\n", record->checksum, crc);
         exit(1);
     }
@@ -317,8 +317,7 @@ static void extract_shared_resource_endpoint(const Extraction *x, uint32_t paylo
     free(expanded.p);
 }
 
-static PayloadLayout payload_layout(const Extraction *x, const Record *record,
-                                    size_t shared_count) {
+static PayloadLayout payload_layout(const Record *record, size_t shared_count) {
     size_t member_end = 0;
 
     if (record->has_fork_offsets)
@@ -334,8 +333,9 @@ static PayloadLayout payload_layout(const Extraction *x, const Record *record,
     if (shared_count > 1)
         return PAYLOAD_SHARED_MEMBER;
 
-    if (catalog_has_late_payloads(x->layout) && record->packed[0] &&
-        record->packed[1] && record->expanded[0] && !record->expanded[1])
+    if (record->packed[0] && record->packed[1] && record->expanded[0] &&
+        !record->expanded[1] && record->packed[1] >= record->expanded[0] &&
+        record->packed[1] >= member_end)
         return PAYLOAD_FRAMED_MEMBER;
 
     if (record->has_fork_offsets && record->packed[0] && member_end &&
@@ -454,7 +454,7 @@ static void extract_records(const Extraction *x) {
         const Record *record = &x->records[i];
 
         if (x->options->list)
-            print_record(record, i, x->options->raw_names);
+            print_record(record, i);
         if (!x->options->out)
             continue;
         if (record_is_empty_file(record)) {
@@ -466,7 +466,7 @@ static void extract_records(const Extraction *x) {
             continue;
         size_t first = i;
         size_t shared_count = shared_records(x, record->payload, &first);
-        PayloadLayout layout = payload_layout(x, record, shared_count);
+        PayloadLayout layout = payload_layout(record, shared_count);
 
         if (layout == PAYLOAD_FRAMED_MEMBER) {
             extract_framed(x, i);
@@ -733,8 +733,18 @@ int run_installer(const Options *options, const char *input_path) {
             bool outside_main_segment = record->payload > catalog_offset ||
                                         packed_size > catalog_offset - record->payload;
 
-            if (segment_count > 1 && record->file &&
-                (record->segment != 1 || outside_main_segment) &&
+            /*
+             * Early multi-file installers may label a record as segment 1
+             * even though its payload offset addresses another media file.
+             * Later catalog layouts deliberately place some update members
+             * after the catalog, so their offsets are not media evidence.
+             */
+            bool absent_segment = segment_count > 1 &&
+                                  (record->segment != 1 ||
+                                   (outside_main_segment &&
+                                    !catalog_has_late_payloads(x.layout)));
+
+            if (absent_segment && record->file &&
                 (record->expanded[0] || record->expanded[1]) &&
                 (record->packed[0] || record->packed[1]))
                 record->external = true;
@@ -760,7 +770,7 @@ int run_installer(const Options *options, const char *input_path) {
                 if (record_has_payload(record) &&
                     (!record->name || strcmp(record->name, "Icon\r")))
                     complete = true;
-                if (record->base_dependent && !record->external && packed_size &&
+                if (record->base_dependent && packed_size &&
                     (record->payload >= catalog_offset ||
                      packed_size > catalog_offset - record->payload))
                     unavailable = true;

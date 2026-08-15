@@ -69,11 +69,12 @@ A compressed catalog expands to ordinary `DVCT`, `FVCT`, and `PACK` records.
 This storage choice is independent of the record-body layout. VISE 7.0.1, for
 example, can store the same wide record bodies either directly or compressed.
 
-`SVCT+0x14` is the number of media segments. In a multi-segment installer,
+`SVCT+0x14` is the nominal media-segment count. In a segmented catalog,
 `FVCT+0x62` selects the segment containing the member. The catalog-bearing
-application can contain segment-1 members itself; records assigned to another
-segment, or whose member extends beyond the application's payload area, are
-external until the corresponding segment file is supplied.
+application contains segment-1 members itself; records assigned to another or
+unspecified segment are external until the corresponding media file is
+supplied. Some partial-media installers leave the nominal count at one, so the
+explicit record assignments are authoritative when present.
 
 Some single-segment installers keep the payload bytes in a sibling file named
 `Installer.data`. Payload offsets address that companion directly; `unvise`
@@ -222,7 +223,12 @@ the observed corpus.
 - Fork sizes and payload offset retain their common offsets.
 - The fixed body ends at `+0x7c`; the primary name length is at `+0x7a`.
 - `+0x58` is the destination reference. It usually names a `DVCT` ID.
-- This is not unconditionally a catalog directory ID.
+- This is not unconditionally a catalog directory ID. It can instead name a
+  runtime destination object such as a system folder or selected install
+  location.
+- When it is a destination object, catalog preorder keeps the file under the
+  current `DVCT`. The recovered Lite loader represents the resulting
+  hierarchy internally as preorder records with explicit depths.
 - A custom folder icon (`Icon\r`, Finder type `icon`, creator `MACS`) carries
   that runtime object rather than a `DVCT` ID. The operation applies to the
   immediately preceding directory in catalog preorder. `unvise` recognizes
@@ -267,8 +273,17 @@ Several `FVCT` records may reference one compressed member:
   record retains the logical pathname. Later distinct records receive a
   `~NNNN` suffix, where `NNNN` is the stable catalog record number. Data and
   resource forks from one record retain the same suffix.
+- If installation conditions select either a file or a directory at the same
+  pathname, the directory keeps the ordinary name and the file receives its
+  record-number suffix. This preserves both alternatives on modern
+  filesystems, which cannot represent both objects at one path.
+- Collision comparison folds ASCII case, matching the names that collide on
+  classic HFS and default macOS volumes in the observed corpus.
 
-### Late framed and overlapping payloads
+Early creators may encode a top-level `DVCT` with `parent ID == directory ID`.
+This is a virtual-root sentinel, not a recursive directory.
+
+### Framed and overlapping payloads
 
 - Shared payload field 0 holds the compressed member size.
 - Shared payload field 1 holds the complete expanded size.
@@ -276,6 +291,9 @@ Several `FVCT` records may reference one compressed member:
   to divide framed members.
 - Bytes not covered by a catalog record are not output.
 - A single data-only record can use the same framing and offset fields.
+- The single-file framed form is also present in VISE 6.5: packed field 0 is
+  the compressed member size, packed field 1 is the complete expanded frame,
+  and the declared data fork may cover only its prefix.
 - A subtype-6 resource-update record can share the following complete member's
   payload offset while giving an earlier packed endpoint. The shorter endpoint
   does not terminate a DEFLATE stream, and its `+0x54` field is not a fork CRC.
@@ -475,9 +493,9 @@ Processing order:
 - Carbon catalog layout follows the low SVCT revision byte: VISE 7.3 uses the
   ordinary layout at revision 11, the late layout begins at revision 12 in
   VISE 7.4, and VISE 8.5 uses revision 14.
-- Lite custom-folder-icon destination objects are resolved against the
-  immediately preceding directory. Other unresolved Lite destinations are
-  rejected.
+- Lite runtime destination objects do not define catalog hierarchy. Files
+  carrying them remain under the current directory in catalog preorder;
+  custom-folder-icon operations use the same rule.
 - Revisions 12 and 13 use `0xa0`-byte `DVCT` bodies; revision 14 uses
   `0xa4`-byte bodies.
 - The complete semantics of every `FVCT` subtype and flag are not known.

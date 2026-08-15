@@ -82,13 +82,13 @@ static char *record_name(Buffer data, Record *r, bool raw_names) {
     return NULL;
 }
 
-void print_quoted(FILE *f, const char *s, bool raw) {
+void print_quoted(FILE *f, const char *s) {
     fputc('"', f);
 
     for (; *s; s++) {
         unsigned char c = (unsigned char)*s;
 
-        if (c < 0x20 || c == 0x7f || (raw && c >= 0x80))
+        if (c < 0x20 || c == 0x7f)
             fprintf(f, "\\x%02X", c);
         else if (c == '"' || c == '\\')
             fprintf(f, "\\%c", c);
@@ -506,9 +506,9 @@ static void decode_file_record(Buffer data, Record *record, CatalogLayout layout
                                      (layout == CATALOG_COMPACT || layout == CATALOG_SHORT ?
                                           0x60 : 0x58));
     if (record->file && record->end - record->off >= 0x70) {
-        record->has_fork_offsets = true;
         record->fork_offset[0] = be32(data, record->off + 0x68);
         record->fork_offset[1] = be32(data, record->off + 0x6c);
+        record->has_fork_offsets = record->fork_offset[0] || record->fork_offset[1];
     }
     if (layout == CATALOG_LATE) {
         record->depth = be16(data, record->off + 0x60);
@@ -526,6 +526,9 @@ static void decode_records(Buffer data, Record *records, size_t count, CatalogLa
         if (!strcmp(record->tag, "DVCT") && record->end - record->off >= 0x24) {
             record->dir_id = be32(data, record->off + 0x1c);
             record->parent = be32(data, record->off + 0x20);
+            /* Early creators encode a top-level install folder as its own parent. */
+            if (record->parent == record->dir_id)
+                record->parent = 0;
             /*
              * The 68K directory loader copies raw +0x04..+0x13 as Finder
              * information and raw +0x14/+0x18 as creation/modification time.
@@ -629,11 +632,14 @@ static void recover_lite_paths(Record *records, size_t count) {
             continue;
         }
 
-        fprintf(stderr, "unvise: unresolved Lite destination 0x%08X for ",
-                record->parent);
-        print_quoted(stderr, record->name ? record->name : "unnamed", false);
-        fputc('\n', stderr);
-        exit(1);
+        /*
+         * +0x58 is also used for runtime destination objects (system folders,
+         * selected install locations, and similar aliases). It is not a
+         * catalog parent ID in that form. Lite's catalog order keeps the file
+         * under the current DVCT; the recovered loader builds the same
+         * hierarchy as an internal preorder/depth array.
+         */
+        record->parent = current_dir;
     }
 }
 
@@ -723,6 +729,25 @@ static bool record_outputs_fork(const Record *record) {
            (record->packed[0] || record->packed[1]);
 }
 
+static bool record_is_file(const Record *record) {
+    return !strcmp(record->tag, "FVCT") && record->file;
+}
+
+static bool path_equal(const char *a, const char *b) {
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a++;
+        unsigned char cb = (unsigned char)*b++;
+
+        if (ca >= 'A' && ca <= 'Z')
+            ca = (unsigned char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z')
+            cb = (unsigned char)(cb + ('a' - 'A'));
+        if (ca != cb)
+            return false;
+    }
+    return *a == *b;
+}
+
 static void append_record_suffix(Record *record, size_t index) {
     char suffix[32];
     snprintf(suffix, sizeof(suffix), "~%04zu", index);
@@ -750,9 +775,25 @@ static void plan_output_paths(Record *all, size_t count) {
         if (!record_outputs_fork(&all[i]))
             continue;
         for (size_t j = 0; j < i; j++)
-            if (record_outputs_fork(&all[j]) && !strcmp(all[i].path, all[j].path)) {
+            if (record_outputs_fork(&all[j]) && path_equal(all[i].path, all[j].path)) {
                 all[j].output_group = j;
                 all[i].output_group = j;
+                append_record_suffix(&all[i], i);
+                break;
+            }
+    }
+
+    /*
+     * Installation conditions can also select either a file or a directory
+     * at one logical path. Keep the directory hierarchy at its ordinary name
+     * and suffix the file alternative, which cannot coexist with it on HFS,
+     * APFS, or a POSIX filesystem.
+     */
+    for (size_t i = 0; i < count; i++) {
+        if (!record_is_file(&all[i]))
+            continue;
+        for (size_t j = 0; j < count; j++)
+            if (!strcmp(all[j].tag, "DVCT") && path_equal(all[i].path, all[j].path)) {
                 append_record_suffix(&all[i], i);
                 break;
             }
